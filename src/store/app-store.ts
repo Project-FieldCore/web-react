@@ -39,6 +39,8 @@ import { login as apiLogin } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
+import * as modelsApi from '@/lib/models-api';
+import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { onUnauthorized, setAuthToken } from '@/lib/auth-token';
 
@@ -102,8 +104,11 @@ interface AppState {
   updateUser: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => Promise<Result>;
   setUserStatus: (id: string, status: UserStatus) => Promise<Result>;
 
-  // --- modelos (UC-04, UC-05) ---
-  createDraftModel: () => string;
+  // --- modelos (UC-04, UC-05) — integrados à API (#134). As edições do
+  // construtor (meta/seções/itens) mexem só no rascunho local; `saveModel`,
+  // `publishModel` e `createDraftModel` é que falam com a API. ---
+  createDraftModel: () => Promise<ResultWithId>;
+  saveModel: (modelId: string) => Promise<Result>;
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
   addSection: (modelId: string) => void;
   removeSection: (modelId: string, sectionId: string) => void;
@@ -111,7 +116,7 @@ interface AppState {
   addItem: (modelId: string, sectionId: string) => void;
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
   updateItem: (modelId: string, sectionId: string, itemId: string, patch: Partial<ModelItem>) => void;
-  publishModel: (modelId: string) => Result;
+  publishModel: (modelId: string) => Promise<Result>;
 
   // --- agendamento (UC-06) ---
   scheduleInspection: (input: {
@@ -123,16 +128,16 @@ interface AppState {
     prioridade: Priority;
     dataPrevista: string;
     orientacoes?: string;
-  }) => ResultWithId;
+  }) => Promise<ResultWithId>;
 
-  // --- revisão (UC-16, UC-17) ---
-  startReview: (inspectionId: string) => void;
-  approveInspection: (inspectionId: string, supervisorNome: string, comentario?: string) => void;
-  rejectInspection: (inspectionId: string, supervisorNome: string, motivo: string) => Result;
-  returnForCorrection: (inspectionId: string, supervisorNome: string, comentario: string) => Result;
+  // --- revisão (UC-16, UC-17) — integrada à API (#135) ---
+  startReview: (inspectionId: string) => Promise<Result>;
+  approveInspection: (inspectionId: string, comentario?: string) => Promise<Result>;
+  rejectInspection: (inspectionId: string, motivo: string) => Promise<Result>;
+  returnForCorrection: (inspectionId: string, comentario: string) => Promise<Result>;
 
-  // --- não conformidades ---
-  resolveNonConformity: (inspectionId: string, itemId: string, status: NonConformityStatus) => void;
+  // --- não conformidades — integradas à API (#135) ---
+  resolveNonConformity: (inspectionId: string, itemId: string, status: NonConformityStatus) => Promise<Result>;
 
   // --- responder checklist (UC-11, UC-12) ---
   saveAnswer: (inspectionId: string, itemId: string, patch: Partial<Answer>) => void;
@@ -141,12 +146,12 @@ interface AppState {
     itemId: string,
     patch: Partial<{ titulo: string; descricao: string; criticidade: Criticidade; evidenceCount: number; photos: string[] }>
   ) => void;
-  submitInspection: (inspectionId: string) => Result;
+  submitInspection: (inspectionId: string) => Promise<Result>;
   saveGeolocation: (inspectionId: string, geo: { lat: number; lng: number }) => void;
   confirmEquipmentQr: (inspectionId: string, qrCode: string) => Result;
 
-  // --- sincronização offline ---
-  syncNow: () => Promise<void>;
+  // --- sincronização offline: envia à API o que está na fila (#135) ---
+  syncNow: () => Promise<Result>;
 }
 
 function newId(prefix: string) {
@@ -191,6 +196,11 @@ export const useAppStore = create<AppState>()(
     };
     set((s) => ({ auditEvents: [event, ...s.auditEvents] }));
   }
+
+  const replaceInspection = (inspection: Inspection) =>
+    set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspection.id ? inspection : i)) }));
+  const replaceModel = (model: InspectionModel) =>
+    set((s) => ({ models: s.models.map((m) => (m.id === model.id ? model : m)) }));
 
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
@@ -484,20 +494,28 @@ export const useAppStore = create<AppState>()(
       pushAudit('REJEITOU_ACESSO', 'Pedido de acesso', requestId);
     },
 
-    createDraftModel: () => {
-      const id = newId('mod');
-      const draft: InspectionModel = {
-        id,
-        title: 'Novo modelo de inspeção',
-        description: '',
-        category: 'Geral',
-        status: 'RASCUNHO',
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        sections: [],
-      };
+    createDraftModel: async () => {
+      let draft: InspectionModel;
+      try {
+        draft = await modelsApi.createModel({ title: 'Novo modelo de inspeção', description: '', category: 'Geral' });
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível criar o modelo. Tente novamente.');
+      }
       set((s) => ({ models: [draft, ...s.models] }));
-      return id;
+      pushAudit('CRIOU', 'Modelo de inspeção', draft.id, draft.title);
+      return { ok: true, id: draft.id };
+    },
+
+    saveModel: async (modelId) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      try {
+        replaceModel(await modelsApi.saveModel(model));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível salvar o modelo. Tente novamente.');
+      }
+      pushAudit('ATUALIZOU', 'Modelo de inspeção', modelId);
+      return { ok: true };
     },
 
     updateModelMeta: (modelId, patch) => {
@@ -585,7 +603,7 @@ export const useAppStore = create<AppState>()(
 
     // RN-015/016: precisa de título, categoria e ao menos uma seção com item válido.
     // RN-020: publicar um modelo já publicado gera uma nova versão, preservando a anterior.
-    publishModel: (modelId) => {
+    publishModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
       if (!model.title.trim()) return { ok: false, error: 'Informe um título para o modelo.' };
@@ -595,18 +613,22 @@ export const useAppStore = create<AppState>()(
       const missingType = model.sections.some((sec) => sec.items.some((it) => !it.type));
       if (missingType) return { ok: false, error: 'Todo item precisa de um tipo de resposta (RN-016).' };
 
-      const nextVersion = model.status === 'PUBLICADO' ? model.version + 1 : model.version;
-      set((s) => ({
-        models: s.models.map((m) =>
-          m.id === modelId ? { ...m, status: 'PUBLICADO', version: nextVersion, updatedAt: new Date().toISOString() } : m
-        ),
-      }));
-      pushAudit('PUBLICOU', 'Modelo de inspeção', modelId, `${model.title} · v${nextVersion}`);
+      // A API recebe o rascunho completo e só então publica — quem decide a
+      // nova versão (RN-020) é ela; usamos o que voltar.
+      let published: InspectionModel;
+      try {
+        await modelsApi.saveModel(model);
+        published = await modelsApi.publishModel(modelId);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível publicar o modelo. Tente novamente.');
+      }
+      replaceModel(published);
+      pushAudit('PUBLICOU', 'Modelo de inspeção', modelId, `${published.title} · v${published.version}`);
       return { ok: true };
     },
 
     // RN-024/025/027: inspeção precisa de versão publicada, dados básicos e técnico ativo.
-    scheduleInspection: (input) => {
+    scheduleInspection: async (input) => {
       const model = get().models.find((m) => m.id === input.modeloId);
       if (!model || model.status !== 'PUBLICADO') {
         return { ok: false, error: 'Selecione um modelo com versão publicada (RN-024).' };
@@ -619,85 +641,69 @@ export const useAppStore = create<AppState>()(
         return { ok: false, error: 'Cliente, local e data prevista são obrigatórios (RN-025).' };
       }
 
-      const id = newId('INS');
-      const inspection: Inspection = {
-        id,
-        clienteId: input.clienteId,
-        localId: input.localId,
-        equipamentoId: input.equipamentoId,
-        modeloId: input.modeloId,
-        modeloVersao: model.version,
-        tecnicoId: input.tecnicoId,
-        prioridade: input.prioridade,
-        dataPrevista: input.dataPrevista,
-        orientacoes: input.orientacoes,
-        status: 'ATRIBUIDA',
-        answers: {},
-        nonConformities: {},
-      };
+      let inspection: Inspection;
+      try {
+        inspection = await inspectionsApi.scheduleInspection(input);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+      }
       set((s) => ({ inspections: [inspection, ...s.inspections] }));
-      pushAudit('AGENDOU', 'Inspeção', id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);
-      return { ok: true, id };
+      pushAudit('AGENDOU', 'Inspeção', inspection.id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);
+      return { ok: true, id: inspection.id };
     },
 
-    startReview: (inspectionId) => {
-      set((s) => ({
-        inspections: s.inspections.map((i) => (i.id === inspectionId && i.status === 'ENVIADA' ? { ...i, status: 'EM_REVISAO' } : i)),
-      }));
+    // Revisão (UC-16/UC-17): a API devolve a inspeção atualizada (status, review,
+    // correcoes) e ela substitui o registro local. supervisorNome vem da sessão no backend.
+    startReview: async (inspectionId) => {
+      try {
+        replaceInspection(await inspectionsApi.startReview(inspectionId));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível iniciar a revisão. Tente novamente.');
+      }
       pushAudit('INICIOU_REVISAO', 'Inspeção', inspectionId);
+      return { ok: true };
     },
 
-    approveInspection: (inspectionId, supervisorNome, comentario) => {
-      set((s) => ({
-        inspections: s.inspections.map((i) =>
-          i.id === inspectionId
-            ? { ...i, status: 'APROVADA', review: { supervisorNome, comentario, decidedAt: new Date().toISOString() } }
-            : i
-        ),
-      }));
+    approveInspection: async (inspectionId, comentario) => {
+      try {
+        replaceInspection(await inspectionsApi.approveInspection(inspectionId, comentario));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível aprovar a inspeção. Tente novamente.');
+      }
       pushAudit('APROVOU', 'Inspeção', inspectionId, comentario);
+      return { ok: true };
     },
 
     // RN-080: reprovação deve possuir motivo obrigatório.
-    rejectInspection: (inspectionId, supervisorNome, motivo) => {
+    rejectInspection: async (inspectionId, motivo) => {
       if (!motivo.trim()) return { ok: false, error: 'Informe o motivo da reprovação (RN-080).' };
-      set((s) => ({
-        inspections: s.inspections.map((i) =>
-          i.id === inspectionId
-            ? {
-                ...i,
-                status: 'REPROVADA',
-                review: { supervisorNome, motivoReprovacao: motivo, decidedAt: new Date().toISOString() },
-              }
-            : i
-        ),
-      }));
+      try {
+        replaceInspection(await inspectionsApi.rejectInspection(inspectionId, motivo.trim()));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível reprovar a inspeção. Tente novamente.');
+      }
       pushAudit('REPROVOU', 'Inspeção', inspectionId, motivo);
       return { ok: true };
     },
 
-    resolveNonConformity: (inspectionId, itemId, status) => {
-      set((s) => ({
-        inspections: s.inspections.map((i) =>
-          i.id === inspectionId && i.nonConformities[itemId]
-            ? { ...i, nonConformities: { ...i.nonConformities, [itemId]: { ...i.nonConformities[itemId], status } } }
-            : i
-        ),
-      }));
+    resolveNonConformity: async (inspectionId, itemId, status) => {
+      try {
+        replaceInspection(await inspectionsApi.setNonConformityStatus(inspectionId, itemId, status));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível atualizar a não conformidade. Tente novamente.');
+      }
       pushAudit(status === 'RESOLVIDA' ? 'RESOLVEU' : 'REABRIU', 'Não conformidade', `${inspectionId}/${itemId}`);
+      return { ok: true };
     },
 
     // Devolve a inspeção para o técnico corrigir, com feedback obrigatório do gestor.
-    returnForCorrection: (inspectionId, supervisorNome, comentario) => {
+    returnForCorrection: async (inspectionId, comentario) => {
       if (!comentario.trim()) return { ok: false, error: 'Descreva o que precisa ser corrigido antes de devolver ao técnico.' };
-      const feedback: CorrectionFeedback = { supervisorNome, comentario, createdAt: new Date().toISOString() };
-      set((s) => ({
-        inspections: s.inspections.map((i) =>
-          i.id === inspectionId
-            ? { ...i, status: 'DEVOLVIDA', correcoes: [...(i.correcoes ?? []), feedback] }
-            : i
-        ),
-      }));
+      try {
+        replaceInspection(await inspectionsApi.returnForCorrection(inspectionId, comentario.trim()));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível devolver a inspeção. Tente novamente.');
+      }
       pushAudit('DEVOLVEU', 'Inspeção', inspectionId, comentario);
       return { ok: true };
     },
@@ -738,7 +744,7 @@ export const useAppStore = create<AppState>()(
     },
 
     // RN-039/040: todo item obrigatório precisa de resposta; não conformidade crítica exige evidência.
-    submitInspection: (inspectionId) => {
+    submitInspection: async (inspectionId) => {
       const inspection = get().inspections.find((i) => i.id === inspectionId);
       if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
       const model = get().models.find((m) => m.id === inspection.modeloId);
@@ -759,9 +765,14 @@ export const useAppStore = create<AppState>()(
         }
       }
 
-      set((s) => ({
-        inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, status: 'ENVIADA' } : i)),
-      }));
+      // Envia o que está preenchido e só então fecha a inspeção na API.
+      try {
+        await inspectionsApi.syncResponses(inspection);
+        replaceInspection(await inspectionsApi.submitInspection(inspectionId));
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível enviar a inspeção. Suas respostas continuam salvas neste dispositivo.');
+      }
+      set((s) => ({ syncQueue: s.syncQueue.filter((q) => q.inspectionId !== inspectionId) }));
       pushAudit('ENVIOU', 'Inspeção', inspectionId);
       return { ok: true };
     },
@@ -791,12 +802,36 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
-    // Sincronização simulada: em campo, a fila fica pendente até haver conexão.
+    // Sincronização offline: a fila só guarda "o que mudou" — o payload enviado é
+    // o estado atual de cada inspeção pendente. Itens só saem da fila quando a
+    // API confirma; se uma inspeção falhar, as demais seguem e o erro é reportado.
     syncNow: async () => {
-      if (get().syncing || get().syncQueue.length === 0) return;
+      if (get().syncing) return { ok: true };
+      const pendingIds = Array.from(new Set(get().syncQueue.map((q) => q.inspectionId)));
+      if (pendingIds.length === 0) return { ok: true };
       set({ syncing: true });
-      await new Promise((resolve) => setTimeout(resolve, 900));
-      set({ syncing: false, syncQueue: [], lastSyncAt: new Date().toISOString() });
+      let failure: { ok: false; error: string } | null = null;
+      const synced: string[] = [];
+      for (const id of pendingIds) {
+        const inspection = get().inspections.find((i) => i.id === id);
+        if (!inspection) {
+          synced.push(id);
+          continue;
+        }
+        try {
+          // O status é decidido pela API — a resposta do sync não sobrescreve o estado local.
+          await inspectionsApi.syncResponses(inspection);
+          synced.push(id);
+        } catch (error) {
+          failure ??= toErrorResult(error, 'Não foi possível sincronizar. Tente novamente.');
+        }
+      }
+      set((s) => ({
+        syncing: false,
+        syncQueue: s.syncQueue.filter((q) => !synced.includes(q.inspectionId)),
+        lastSyncAt: synced.length > 0 ? new Date().toISOString() : s.lastSyncAt,
+      }));
+      return failure ?? { ok: true };
     },
       };
     },
