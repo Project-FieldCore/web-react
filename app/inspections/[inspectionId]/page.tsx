@@ -1,9 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { ErrorState, InlineError } from '@/components/States';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 
 /**
  * UC-16 — Revisar inspeção / UC-17 — Aprovar ou reprovar inspeção.
@@ -29,6 +32,7 @@ export default function InspectionReviewPage() {
   const rejectInspection = useAppStore((s) => s.rejectInspection);
   const returnForCorrection = useAppStore((s) => s.returnForCorrection);
 
+  const review = useAsyncAction();
   const [comentario, setComentario] = useState('');
   const [motivo, setMotivo] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
@@ -37,7 +41,7 @@ export default function InspectionReviewPage() {
   const [returnFeedback, setReturnFeedback] = useState('');
   const [returnError, setReturnError] = useState<string | null>(null);
 
-  if (!inspection) return <div className="text-slate-500">Inspeção não encontrada.</div>;
+  if (!inspection) return <ErrorState title="Inspeção não encontrada" message="Ela pode ter sido removida ou o link está incorreto." />;
 
   const model = models.find((m) => m.id === inspection.modeloId);
   const client = clients.find((c) => c.id === inspection.clienteId);
@@ -48,19 +52,21 @@ export default function InspectionReviewPage() {
   const canReview = inspection.status === 'ENVIADA' || inspection.status === 'EM_REVISAO';
 
   function handleOpenReview() {
-    startReview(inspection!.id);
+    return review.run(() => startReview(inspection!.id));
   }
-  function handleApprove() {
-    approveInspection(inspection!.id, currentUser?.nome ?? 'Supervisor(a)', comentario || undefined);
-    router.push('/inspections');
+  async function handleApprove() {
+    const result = await review.run(() => approveInspection(inspection!.id, comentario || undefined));
+    if (result.ok) router.push('/inspections');
   }
-  function handleReject() {
-    const result = rejectInspection(inspection!.id, currentUser?.nome ?? 'Supervisor(a)', motivo);
+  async function handleReject() {
+    setRejectError(null);
+    const result = await review.run(() => rejectInspection(inspection!.id, motivo));
     if (!result.ok) { setRejectError(result.error); return; }
     router.push('/inspections');
   }
-  function handleReturnForCorrection() {
-    const result = returnForCorrection(inspection!.id, 'Marina Costa', returnFeedback);
+  async function handleReturnForCorrection() {
+    setReturnError(null);
+    const result = await review.run(() => returnForCorrection(inspection!.id, returnFeedback));
     if (!result.ok) { setReturnError(result.error); return; }
     router.push('/inspections');
   }
@@ -74,7 +80,12 @@ export default function InspectionReviewPage() {
           <h1 className="text-2xl font-extrabold text-navy-900">{client?.nome}</h1>
           <p className="text-sm text-slate-500">{location?.nome}{equip ? ` · ${equip.nome}` : ''}</p>
         </div>
-        <InspectionStatusBadge status={inspection.status} />
+        <div className="flex items-center gap-3">
+          <Link href={`/inspections/${inspection.id}/relatorio`} className="text-sm font-bold text-navy-700 whitespace-nowrap">
+            Exportar relatório (PDF)
+          </Link>
+          <InspectionStatusBadge status={inspection.status} />
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -85,7 +96,7 @@ export default function InspectionReviewPage() {
       </div>
 
       {inspection.status === 'ENVIADA' && (
-        <button onClick={handleOpenReview} className="w-full bg-navy-800 text-white rounded-xl py-3 font-bold mb-5">
+        <button onClick={handleOpenReview} disabled={review.pending} className="w-full bg-navy-800 text-white rounded-xl py-3 font-bold mb-5 disabled:opacity-60">
           Iniciar revisão formal
         </button>
       )}
@@ -152,6 +163,8 @@ export default function InspectionReviewPage() {
         ))}
       </div>
 
+      {review.error && !showRejectForm && !showReturnForm && <div className="mb-3"><InlineError message={review.error} /></div>}
+
       {canReview && !showRejectForm && !showReturnForm && (
         <div className="flex flex-col sm:flex-row gap-3">
           <button onClick={() => setShowRejectForm(true)} className="flex-1 bg-white border border-red-200 text-red-600 rounded-xl py-3 font-bold">
@@ -160,8 +173,8 @@ export default function InspectionReviewPage() {
           <button onClick={() => setShowReturnForm(true)} className="flex-1 bg-white border border-orange-200 text-orange-600 rounded-xl py-3 font-bold">
             Devolver para correção
           </button>
-          <button onClick={handleApprove} className="flex-1 bg-brandgreen-600 text-white rounded-xl py-3 font-bold">
-            Aprovar
+          <button onClick={handleApprove} disabled={review.pending} className="flex-1 bg-brandgreen-600 text-white rounded-xl py-3 font-bold disabled:opacity-60">
+            {review.pending ? 'Salvando...' : 'Aprovar'}
           </button>
         </div>
       )}
@@ -185,7 +198,7 @@ export default function InspectionReviewPage() {
           {rejectError && <div className="text-xs text-red-600 font-semibold mb-3">{rejectError}</div>}
           <div className="flex flex-col sm:flex-row gap-2">
             <button onClick={() => setShowRejectForm(false)} className="flex-1 bg-white border border-slate-300 rounded-xl py-2.5 font-bold text-navy-800">Cancelar</button>
-            <button onClick={handleReject} className="flex-1 bg-red-600 text-white rounded-xl py-2.5 font-bold">Confirmar reprovação</button>
+            <button onClick={handleReject} disabled={review.pending} className="flex-1 bg-red-600 text-white rounded-xl py-2.5 font-bold disabled:opacity-60">{review.pending ? 'Salvando...' : 'Confirmar reprovação'}</button>
           </div>
         </div>
       )}
@@ -206,7 +219,7 @@ export default function InspectionReviewPage() {
           {returnError && <div className="text-xs text-red-600 font-semibold mb-3">{returnError}</div>}
           <div className="flex flex-col sm:flex-row gap-2">
             <button onClick={() => setShowReturnForm(false)} className="flex-1 bg-white border border-slate-300 rounded-xl py-2.5 font-bold text-navy-800">Cancelar</button>
-            <button onClick={handleReturnForCorrection} className="flex-1 bg-orange-600 text-white rounded-xl py-2.5 font-bold">Confirmar devolução</button>
+            <button onClick={handleReturnForCorrection} disabled={review.pending} className="flex-1 bg-orange-600 text-white rounded-xl py-2.5 font-bold disabled:opacity-60">{review.pending ? 'Salvando...' : 'Confirmar devolução'}</button>
           </div>
         </div>
       )}

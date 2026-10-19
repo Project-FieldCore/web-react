@@ -75,8 +75,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Sidebar />
-      <main className="min-h-screen min-w-0 pt-20 pb-8 px-4 sm:px-6 lg:pt-8 lg:pb-8 lg:pl-72 lg:pr-8">{children}</main>
+      <div className="print:hidden">
+        <Sidebar />
+      </div>
+      <main className="min-h-screen min-w-0 pt-20 pb-8 px-4 sm:px-6 lg:pt-8 lg:pb-8 lg:pl-72 lg:pr-8 print:p-0">{children}</main>
     </>
   );
 }
