@@ -36,8 +36,18 @@ import {
   MOCK_USERS,
 } from '@/data/mock-data';
 import { login as apiLogin } from '@/lib/auth-api';
+import * as clientsApi from '@/lib/clients-api';
+import * as locationsApi from '@/lib/locations-api';
+import * as usersApi from '@/lib/users-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { onUnauthorized, setAuthToken } from '@/lib/auth-token';
+
+/** Erro de API/rede vira mensagem amigável — mesmo contrato usado pelo login (ver #131/#132). */
+function toErrorResult(error: unknown, fallback: string): { ok: false; error: string } {
+  if (error instanceof ApiError) return { ok: false, error: error.message };
+  if (error instanceof NetworkError) return { ok: false, error: error.message };
+  return { ok: false, error: fallback };
+}
 
 type Result = { ok: true } | { ok: false; error: string };
 type ResultWithId = { ok: true; id: string } | { ok: false; error: string };
@@ -69,26 +79,28 @@ interface AppState {
     role: Extract<UserRole, 'ADMIN' | 'SUPERVISOR'>,
     justificativa?: string
   ) => ResultWithId;
-  approveAccessRequest: (requestId: string, senha: string) => Result;
+  approveAccessRequest: (requestId: string, senha: string) => Promise<Result>;
   rejectAccessRequest: (requestId: string) => void;
 
-  // --- cadastros: clientes/locais/equipamentos (05 - Perfis, RN-009/010/011/013) ---
-  createClient: (nome: string, cnpj?: string) => ResultWithId;
-  updateClient: (id: string, patch: Partial<Pick<Client, 'nome' | 'cnpj'>>) => Result;
-  setClientActive: (id: string, ativo: boolean) => void;
+  // --- cadastros: clientes/locais (05 - Perfis, RN-009/013) — integrados à API (#133) ---
+  createClient: (nome: string, cnpj?: string) => Promise<ResultWithId>;
+  updateClient: (id: string, patch: Partial<Pick<Client, 'nome' | 'cnpj'>>) => Promise<Result>;
+  setClientActive: (id: string, ativo: boolean) => Promise<Result>;
 
-  createLocation: (clienteId: string, nome: string, endereco?: string) => ResultWithId;
-  updateLocation: (id: string, patch: Partial<Pick<Location, 'nome' | 'endereco'>>) => Result;
-  setLocationActive: (id: string, ativo: boolean) => void;
+  createLocation: (clienteId: string, nome: string, endereco?: string) => Promise<ResultWithId>;
+  updateLocation: (id: string, patch: Partial<Pick<Location, 'nome' | 'endereco'>>) => Promise<Result>;
+  setLocationActive: (id: string, ativo: boolean) => Promise<Result>;
 
+  // --- cadastro de equipamentos (RN-010/011/013) — ainda mock: o backend não
+  // expõe nenhuma rota de equipamento, nem placeholder (ver #133). ---
   createEquipment: (localId: string, nome: string, qrCode: string, tipo?: string) => ResultWithId;
   updateEquipment: (id: string, patch: Partial<Pick<Equipment, 'nome' | 'qrCode' | 'tipo'>>) => Result;
   setEquipmentActive: (id: string, ativo: boolean) => void;
 
-  // --- cadastro de usuários (RN-001/002/003/007) ---
-  createUser: (nome: string, email: string, role: UserRole, senha: string) => ResultWithId;
-  updateUser: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => Result;
-  setUserStatus: (id: string, status: UserStatus) => void;
+  // --- cadastro de usuários (RN-001/002/003/007) — integrado à API (#133) ---
+  createUser: (nome: string, email: string, role: UserRole, senha: string) => Promise<ResultWithId>;
+  updateUser: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => Promise<Result>;
+  setUserStatus: (id: string, status: UserStatus) => Promise<Result>;
 
   // --- modelos (UC-04, UC-05) ---
   createDraftModel: () => string;
@@ -182,17 +194,26 @@ export const useAppStore = create<AppState>()(
 
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
-  function createUserInternal(nome: string, email: string, role: UserRole, senha: string): ResultWithId {
+  // Integrado à API (#133) — ver src/lib/users-api.ts para o contrato assumido.
+  async function createUserInternal(nome: string, email: string, role: UserRole, senha: string): Promise<ResultWithId> {
     if (!nome.trim()) return { ok: false, error: 'Informe o nome do usuário.' };
     const normalized = email.trim().toLowerCase();
     if (!isValidEmail(normalized)) return { ok: false, error: 'Informe um e-mail válido.' };
+    // Confere localmente contra o cadastro já carregado — só evita um
+    // round-trip óbvio; quem decide de fato é a API.
     const duplicate = get().users.some((u) => u.email.toLowerCase() === normalized);
     if (duplicate) return { ok: false, error: 'Já existe um usuário com esse e-mail.' };
     if (!senha.trim()) return { ok: false, error: 'Defina uma senha inicial.' };
-    const id = newId('usr');
-    set((s) => ({ users: [...s.users, { id, nome: nome.trim(), email: normalized, role, status: 'ATIVO' }] }));
-    MOCK_CREDENTIALS[normalized] = senha;
-    return { ok: true, id };
+
+    let user: User;
+    try {
+      user = await usersApi.createUser(nome.trim(), normalized, role, senha);
+    } catch (error) {
+      return toErrorResult(error, 'Não foi possível criar o usuário. Tente novamente.');
+    }
+
+    set((s) => ({ users: [...s.users, user] }));
+    return { ok: true, id: user.id };
   }
 
   return {
@@ -271,42 +292,81 @@ export const useAppStore = create<AppState>()(
     },
 
     // RN-009: todo local pertence a um cliente. RN-013: inativação, nunca exclusão física.
-    createClient: (nome, cnpj) => {
+    // Integrado à API (#133) — ver src/lib/clients-api.ts para o contrato assumido.
+    createClient: async (nome, cnpj) => {
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do cliente.' };
-      const id = newId('cli');
-      set((s) => ({ clients: [...s.clients, { id, nome: nome.trim(), cnpj: cnpj?.trim() || undefined, ativo: true }] }));
-      pushAudit('CRIOU', 'Cliente', id, nome.trim());
-      return { ok: true, id };
+      let client: Client;
+      try {
+        client = await clientsApi.createClient(nome.trim(), cnpj?.trim() || undefined);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível criar o cliente. Tente novamente.');
+      }
+      set((s) => ({ clients: [...s.clients, client] }));
+      pushAudit('CRIOU', 'Cliente', client.id, nome.trim());
+      return { ok: true, id: client.id };
     },
-    updateClient: (id, patch) => {
+    updateClient: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do cliente.' };
-      set((s) => ({ clients: s.clients.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+      let client: Client;
+      try {
+        client = await clientsApi.updateClient(id, patch);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      set((s) => ({ clients: s.clients.map((c) => (c.id === id ? client : c)) }));
       pushAudit('ATUALIZOU', 'Cliente', id);
       return { ok: true };
     },
-    setClientActive: (id, ativo) => {
-      set((s) => ({ clients: s.clients.map((c) => (c.id === id ? { ...c, ativo } : c)) }));
+    setClientActive: async (id, ativo) => {
+      let client: Client;
+      try {
+        client = await clientsApi.setClientActive(id, ativo);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível alterar o status do cliente. Tente novamente.');
+      }
+      set((s) => ({ clients: s.clients.map((c) => (c.id === id ? client : c)) }));
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Cliente', id);
+      return { ok: true };
     },
 
-    createLocation: (clienteId, nome, endereco) => {
+    // Integrado à API (#133) — ver src/lib/locations-api.ts (nome assumido
+    // como "site" no backend; ajustar se divergir do contrato real).
+    createLocation: async (clienteId, nome, endereco) => {
       const client = get().clients.find((c) => c.id === clienteId);
       if (!client) return { ok: false, error: 'Cliente não encontrado (RN-009).' };
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do local.' };
-      const id = newId('loc');
-      set((s) => ({ locations: [...s.locations, { id, clienteId, nome: nome.trim(), endereco: endereco?.trim() || undefined, ativo: true }] }));
-      pushAudit('CRIOU', 'Local', id, `${nome.trim()} · ${client.nome}`);
-      return { ok: true, id };
+      let location: Location;
+      try {
+        location = await locationsApi.createLocation(clienteId, nome.trim(), endereco?.trim() || undefined);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível criar o local. Tente novamente.');
+      }
+      set((s) => ({ locations: [...s.locations, location] }));
+      pushAudit('CRIOU', 'Local', location.id, `${nome.trim()} · ${client.nome}`);
+      return { ok: true, id: location.id };
     },
-    updateLocation: (id, patch) => {
+    updateLocation: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do local.' };
-      set((s) => ({ locations: s.locations.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
+      let location: Location;
+      try {
+        location = await locationsApi.updateLocation(id, patch);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
       pushAudit('ATUALIZOU', 'Local', id);
       return { ok: true };
     },
-    setLocationActive: (id, ativo) => {
-      set((s) => ({ locations: s.locations.map((l) => (l.id === id ? { ...l, ativo } : l)) }));
+    setLocationActive: async (id, ativo) => {
+      let location: Location;
+      try {
+        location = await locationsApi.setLocationActive(id, ativo);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível alterar o status do local. Tente novamente.');
+      }
+      set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Local', id);
+      return { ok: true };
     },
 
     // RN-010: todo equipamento pertence a um local no MVP. RN-011: QR Code único.
@@ -342,12 +402,12 @@ export const useAppStore = create<AppState>()(
     },
 
     // Cadastro central de usuários — evita a duplicidade de registros que hoje frustra a Ana (03 - Problema).
-    createUser: (nome, email, role, senha) => {
-      const result = createUserInternal(nome, email, role, senha);
+    createUser: async (nome, email, role, senha) => {
+      const result = await createUserInternal(nome, email, role, senha);
       if (result.ok) pushAudit('CRIOU', 'Usuário', result.id, `${nome.trim()} · ${role}`);
       return result;
     },
-    updateUser: (id, patch) => {
+    updateUser: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do usuário.' };
       if (patch.email !== undefined) {
         const normalized = patch.email.trim().toLowerCase();
@@ -356,14 +416,27 @@ export const useAppStore = create<AppState>()(
         if (duplicate) return { ok: false, error: 'Já existe um usuário com esse e-mail.' };
         patch = { ...patch, email: normalized };
       }
-      set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, ...patch } : u)) }));
+      let user: User;
+      try {
+        user = await usersApi.updateUser(id, patch);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      set((s) => ({ users: s.users.map((u) => (u.id === id ? user : u)) }));
       pushAudit('ATUALIZOU', 'Usuário', id);
       return { ok: true };
     },
     // RN-002: inativação não exclui histórico — por isso não existe "excluir usuário".
-    setUserStatus: (id, status) => {
-      set((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, status } : u)) }));
+    setUserStatus: async (id, status) => {
+      let user: User;
+      try {
+        user = await usersApi.setUserStatus(id, status);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível alterar o status. Tente novamente.');
+      }
+      set((s) => ({ users: s.users.map((u) => (u.id === id ? user : u)) }));
       pushAudit('ALTEROU_STATUS', 'Usuário', id, status);
+      return { ok: true };
     },
 
     // RN-003: acesso ao painel web não é autoatendido — o pedido fica pendente
@@ -391,11 +464,11 @@ export const useAppStore = create<AppState>()(
       return { ok: true, id };
     },
 
-    approveAccessRequest: (requestId, senha) => {
+    approveAccessRequest: async (requestId, senha) => {
       const request = get().accessRequests.find((r) => r.id === requestId);
       if (!request) return { ok: false, error: 'Solicitação não encontrada.' };
       if (request.status !== 'PENDENTE') return { ok: false, error: 'Esta solicitação já foi decidida.' };
-      const result = createUserInternal(request.nome, request.email, request.role, senha);
+      const result = await createUserInternal(request.nome, request.email, request.role, senha);
       if (!result.ok) return result;
       set((s) => ({
         accessRequests: s.accessRequests.map((r) => (r.id === requestId ? { ...r, status: 'APROVADA' } : r)),
