@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState } from '@/components/States';
 import { StatCard, UserStatusBadge } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
 import type { AccessRequest, User, UserRole, UserStatus } from '@/types';
@@ -162,7 +163,7 @@ export default function UsersPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum usuário encontrado.</td></tr>
+              <tr><td colSpan={5}><EmptyState title="Nenhum usuário encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
             )}
           </tbody>
         </table>
@@ -180,7 +181,7 @@ export default function UsersPage() {
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum usuário encontrado.</div>
+            <EmptyState title="Nenhum usuário encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
           )}
         </div>
       </div>

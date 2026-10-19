@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState } from '@/components/States';
 import { ActiveBadge, StatCard } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
 
@@ -75,8 +76,8 @@ export default function ClientsPage() {
       )}
 
       {filtered.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl px-5 py-14 text-center text-slate-400 text-sm">
-          Nenhum cliente encontrado com esses filtros.
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <EmptyState title="Nenhum cliente encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

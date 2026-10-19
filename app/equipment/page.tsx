@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState } from '@/components/States';
 import { ActiveBadge, StatCard } from '@/components/Badges';
 
 /**
@@ -104,7 +105,7 @@ export default function EquipmentCatalogPage() {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum equipamento encontrado com esses filtros.</td></tr>
+              <tr><td colSpan={6}><EmptyState title="Nenhum equipamento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
             )}
           </tbody>
         </table>
@@ -125,7 +126,7 @@ export default function EquipmentCatalogPage() {
             );
           })}
           {filtered.length === 0 && (
-            <div className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum equipamento encontrado com esses filtros.</div>
+            <EmptyState title="Nenhum equipamento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
           )}
         </div>
       </div>

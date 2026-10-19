@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState, InlineError } from '@/components/States';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { CriticidadeTag, NonConformityStatusBadge, StatCard } from '@/components/Badges';
 import type { Criticidade, NonConformity, NonConformityStatus } from '@/types';
 
@@ -31,6 +33,7 @@ export default function NonConformitiesPage() {
   const locations = useAppStore((s) => s.locations);
   const resolveNonConformity = useAppStore((s) => s.resolveNonConformity);
 
+  const action = useAsyncAction();
   const [criticidadeFilter, setCriticidadeFilter] = useState<(typeof CRITICIDADE_FILTERS)[number]['key']>('TODAS');
   const [statusFilter, setStatusFilter] = useState<'TODAS' | NonConformityStatus>('TODAS');
 
@@ -92,9 +95,11 @@ export default function NonConformitiesPage() {
         </select>
       </div>
 
+      {action.error && <div className="mb-4"><InlineError message={action.error} /></div>}
+
       {filtered.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl px-5 py-14 text-center text-slate-400 text-sm">
-          Nenhuma não conformidade encontrada com esses filtros.
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <EmptyState title="Nenhuma não conformidade encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." />
         </div>
       ) : (
         <div className="space-y-3">
@@ -117,8 +122,9 @@ export default function NonConformitiesPage() {
                     Ver inspeção {nc.inspectionId} →
                   </Link>
                   <button
-                    onClick={() => resolveNonConformity(nc.inspectionId, nc.itemId!, nc.status === 'ABERTA' ? 'RESOLVIDA' : 'ABERTA')}
-                    className={`font-semibold ${nc.status === 'ABERTA' ? 'text-emerald-600' : 'text-slate-500'}`}
+                    onClick={() => action.run(() => resolveNonConformity(nc.inspectionId, nc.itemId!, nc.status === 'ABERTA' ? 'RESOLVIDA' : 'ABERTA'))}
+                    disabled={action.pending}
+                    className={`font-semibold disabled:opacity-50 ${nc.status === 'ABERTA' ? 'text-emerald-600' : 'text-slate-500'}`}
                   >
                     {nc.status === 'ABERTA' ? 'Marcar como resolvida' : 'Reabrir'}
                   </button>

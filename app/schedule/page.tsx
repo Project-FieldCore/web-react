@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
+import { InlineError } from '@/components/States';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { Priority } from '@/types';
 
 const PRIORITY_LABEL: Record<Priority, string> = { ALTA: 'Alta', MEDIA: 'Média', BAIXA: 'Baixa' };
@@ -30,7 +32,7 @@ export default function SchedulePage() {
   const [prioridade, setPrioridade] = useState<Priority>('MEDIA');
   const [dataPrevista, setDataPrevista] = useState('');
   const [orientacoes, setOrientacoes] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const submit = useAsyncAction();
   const [success, setSuccess] = useState<string | null>(null);
 
   const availableLocations = useMemo(() => locations.filter((l) => l.clienteId === clienteId), [locations, clienteId]);
@@ -51,8 +53,9 @@ export default function SchedulePage() {
   if (!dataPrevista) missing.push('Data prevista');
   const isComplete = missing.length === 0;
 
-  function handleSubmit() {
-    const result = scheduleInspection({
+  async function handleSubmit() {
+    setSuccess(null);
+    const result = await submit.run(() => scheduleInspection({
       modeloId,
       clienteId,
       localId,
@@ -61,13 +64,8 @@ export default function SchedulePage() {
       prioridade,
       dataPrevista: dataPrevista ? new Date(dataPrevista).toISOString() : '',
       orientacoes,
-    });
-    if (!result.ok) {
-      setError(result.error);
-      setSuccess(null);
-      return;
-    }
-    setError(null);
+    }));
+    if (!result.ok) return;
     setSuccess(`Inspeção ${result.id} agendada com sucesso.`);
     setTimeout(() => router.push('/inspections'), 900);
   }
@@ -173,15 +171,15 @@ export default function SchedulePage() {
           </Section>
 
           <div className="p-6 pt-5">
-            {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-semibold rounded-xl px-4 py-3 mb-4">{error}</div>}
+            {submit.error && <div className="mb-4"><InlineError message={submit.error} /></div>}
             {success && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3 mb-4">{success}</div>}
 
             <button
               onClick={handleSubmit}
-              disabled={!isComplete}
+              disabled={!isComplete || submit.pending || !!success}
               className="w-full bg-brandgreen-600 text-white rounded-xl py-3 font-bold transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
             >
-              Confirmar agendamento
+              {submit.pending ? 'Agendando...' : 'Confirmar agendamento'}
             </button>
             {!isComplete && (
               <p className="text-xs text-slate-400 text-center mt-2">

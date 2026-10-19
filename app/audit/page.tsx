@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState } from '@/components/States';
 import { StatCard } from '@/components/Badges';
 
 /**
@@ -85,7 +86,7 @@ export default function AuditPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum evento encontrado com esses filtros.</td></tr>
+              <tr><td colSpan={5}><EmptyState title="Nenhum evento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
             )}
           </tbody>
         </table>
@@ -103,7 +104,7 @@ export default function AuditPage() {
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="px-5 py-10 text-center text-slate-400 text-sm">Nenhum evento encontrado com esses filtros.</div>
+            <EmptyState title="Nenhum evento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
           )}
         </div>
       </div>

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge, StatCard } from '@/components/Badges';
+import { EmptyState, InlineError } from '@/components/States';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { ModelStatus } from '@/types';
 
 const STATUS_FILTERS: { key: 'TODOS' | ModelStatus; label: string }[] = [
@@ -20,6 +22,7 @@ export default function ModelsPage() {
   const models = useAppStore((s) => s.models);
   const createDraftModel = useAppStore((s) => s.createDraftModel);
   const router = useRouter();
+  const create = useAsyncAction();
 
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]['key']>('TODOS');
   const [categoryFilter, setCategoryFilter] = useState('TODAS');
@@ -39,9 +42,9 @@ export default function ModelsPage() {
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   }, [models, statusFilter, categoryFilter, search]);
 
-  function handleNew() {
-    const id = createDraftModel();
-    router.push(`/models/${id}`);
+  async function handleNew() {
+    const result = await create.run(() => createDraftModel());
+    if (result.ok) router.push(`/models/${result.id}`);
   }
 
   return (
@@ -51,10 +54,16 @@ export default function ModelsPage() {
           <h1 className="text-2xl font-extrabold text-navy-900">Modelos de inspeção</h1>
           <p className="text-sm text-slate-500">Crie, organize e publique versões de checklist (UC-04, UC-05)</p>
         </div>
-        <button onClick={handleNew} className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap">
-          + Novo modelo
+        <button
+          onClick={handleNew}
+          disabled={create.pending}
+          className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap disabled:opacity-60"
+        >
+          {create.pending ? 'Criando...' : '+ Novo modelo'}
         </button>
       </div>
+
+      {create.error && <div className="mb-4"><InlineError message={create.error} /></div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total de modelos" value={models.length} />
@@ -94,8 +103,8 @@ export default function ModelsPage() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl px-5 py-14 text-center text-slate-400 text-sm">
-          Nenhum modelo encontrado com esses filtros.
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <EmptyState title="Nenhum modelo encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

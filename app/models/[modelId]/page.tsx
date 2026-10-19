@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge } from '@/components/Badges';
+import { ErrorState, InlineError } from '@/components/States';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { ItemType } from '@/types';
 
 const ITEM_TYPES: { value: ItemType; label: string }[] = [
@@ -37,12 +39,15 @@ export default function ModelBuilderPage() {
   const removeItem = useAppStore((s) => s.removeItem);
   const updateItem = useAppStore((s) => s.updateItem);
   const publishModel = useAppStore((s) => s.publishModel);
+  const saveModel = useAppStore((s) => s.saveModel);
 
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const publish = useAsyncAction();
+  const save = useAsyncAction();
+
   const [publishSuccess, setPublishSuccess] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  if (!model) return <div className="text-slate-500">Modelo não encontrado.</div>;
+  if (!model) return <ErrorState title="Modelo não encontrado" message="Ele pode ter sido removido ou o link está incorreto." />;
 
   const totalItems = model.sections.reduce((sum, s) => sum + s.items.length, 0);
   const requiredItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.required).length, 0);
@@ -54,15 +59,17 @@ export default function ModelBuilderPage() {
   const hasItem = model.sections.some((s) => s.items.length > 0);
   const canPublish = titleOk && hasSection && hasItem;
 
-  function handlePublish() {
-    const result = publishModel(model!.id);
-    if (!result.ok) {
-      setPublishError(result.error);
-      setPublishSuccess(null);
-      return;
-    }
-    setPublishError(null);
-    setPublishSuccess(model!.status === 'PUBLICADO' ? 'Nova versão publicada com sucesso.' : 'Modelo publicado com sucesso.');
+  async function handlePublish() {
+    const wasPublished = model!.status === 'PUBLICADO';
+    setPublishSuccess(null);
+    const result = await publish.run(() => publishModel(model!.id));
+    if (result.ok) setPublishSuccess(wasPublished ? 'Nova versão publicada com sucesso.' : 'Modelo publicado com sucesso.');
+  }
+
+  async function handleSave() {
+    setPublishSuccess(null);
+    const result = await save.run(() => saveModel(model!.id));
+    if (result.ok) setPublishSuccess('Rascunho salvo.');
   }
 
   return (
@@ -243,11 +250,7 @@ export default function ModelBuilderPage() {
             </ul>
           </div>
 
-          {publishError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-semibold rounded-xl px-4 py-3">
-              {publishError}
-            </div>
-          )}
+          <InlineError message={publish.error ?? save.error} />
           {publishSuccess && (
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3">
               {publishSuccess}
@@ -259,11 +262,18 @@ export default function ModelBuilderPage() {
               Ver prévia do checklist
             </button>
             <button
+              onClick={handleSave}
+              disabled={save.pending || publish.pending}
+              className="w-full bg-white border border-slate-300 rounded-xl py-3 font-bold text-navy-800 disabled:opacity-60"
+            >
+              {save.pending ? 'Salvando...' : 'Salvar rascunho'}
+            </button>
+            <button
               onClick={handlePublish}
-              disabled={!canPublish}
+              disabled={!canPublish || publish.pending || save.pending}
               className="w-full bg-brandgreen-600 text-white rounded-xl py-3 font-bold transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
             >
-              {model.status === 'PUBLICADO' ? 'Publicar nova versão' : 'Publicar versão'}
+              {publish.pending ? 'Publicando...' : model.status === 'PUBLICADO' ? 'Publicar nova versão' : 'Publicar versão'}
             </button>
           </div>
         </div>
