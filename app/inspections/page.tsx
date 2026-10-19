@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
+import { EmptyState } from '@/components/States';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
 import type { InspectionStatus } from '@/types';
 
@@ -31,8 +32,7 @@ export default function InspectionsListPage() {
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.nome ?? '—';
   const techName = (id: string) => users.find((u) => u.id === id)?.nome ?? '—';
-  const detailHref = (i: (typeof inspections)[number]) =>
-    i.status === 'ATRIBUIDA' || i.status === 'EM_ANDAMENTO' || i.status === 'DEVOLVIDA' ? `/inspections/${i.id}/responder` : `/inspections/${i.id}`;
+  const detailHref = (i: (typeof inspections)[number]) => `/inspections/${i.id}`;
 
   const filtered = useMemo(() => {
     return inspections.filter((i) => {
@@ -106,7 +106,7 @@ export default function InspectionsListPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400 text-sm">Nenhuma inspeção encontrada com esses filtros.</td></tr>
+              <tr><td colSpan={6}><EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
             )}
           </tbody>
         </table>
@@ -129,19 +129,13 @@ export default function InspectionsListPage() {
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-mono text-slate-500">{new Date(i.dataPrevista).toLocaleDateString('pt-BR')}</span>
                 <span className="text-xs font-bold text-navy-700 whitespace-nowrap">
-                  {i.status === 'DEVOLVIDA'
-                    ? 'Corrigir →'
-                    : i.status === 'ATRIBUIDA' || i.status === 'EM_ANDAMENTO'
-                    ? 'Responder →'
-                    : i.status === 'ENVIADA' || i.status === 'EM_REVISAO'
-                    ? 'Revisar →'
-                    : 'Ver →'}
+                  {i.status === 'ENVIADA' || i.status === 'EM_REVISAO' ? 'Revisar →' : 'Ver →'}
                 </span>
               </div>
             </Link>
           ))}
           {filtered.length === 0 && (
-            <div className="px-5 py-10 text-center text-slate-400 text-sm">Nenhuma inspeção encontrada com esses filtros.</div>
+            <EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." />
           )}
         </div>
       </div>
