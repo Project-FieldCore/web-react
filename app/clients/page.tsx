@@ -19,6 +19,7 @@ export default function ClientsPage() {
   const [search, setSearch] = useState('');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -28,6 +29,11 @@ export default function ClientsPage() {
   }, [clients, search, showOnlyActive]);
 
   const locationCount = (clienteId: string) => locations.filter((l) => l.clienteId === clienteId).length;
+
+  async function handleToggleActive(id: string, ativo: boolean) {
+    const result = await setClientActive(id, ativo);
+    setActionError(result.ok ? null : result.error);
+  }
 
   return (
     <div>
@@ -64,6 +70,10 @@ export default function ClientsPage() {
         />
       </div>
 
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-4">{actionError}</div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl px-5 py-14 text-center text-slate-400 text-sm">
           Nenhum cliente encontrado com esses filtros.
@@ -84,7 +94,7 @@ export default function ClientsPage() {
                   {locationCount(c.id)} {locationCount(c.id) === 1 ? 'local' : 'locais'}
                 </span>
                 <button
-                  onClick={() => setClientActive(c.id, !c.ativo)}
+                  onClick={() => handleToggleActive(c.id, !c.ativo)}
                   className={`text-xs font-semibold ${c.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
                 >
                   {c.ativo ? 'Inativar' : 'Ativar'}
@@ -105,15 +115,18 @@ function NewClientModal({
   onCreate,
 }: {
   onClose: () => void;
-  onCreate: (nome: string, cnpj?: string) => { ok: true; id: string } | { ok: false; error: string };
+  onCreate: (nome: string, cnpj?: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
 }) {
   const [nome, setNome] = useState('');
   const [cnpj, setCnpj] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = onCreate(nome, cnpj || undefined);
+    setLoading(true);
+    const result = await onCreate(nome, cnpj || undefined);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -131,8 +144,8 @@ function NewClientModal({
           <input value={cnpj} onChange={(e) => setCnpj(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="00.000.000/0000-00" />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
-        <button type="submit" className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1">
-          Criar cliente
+        <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
+          {loading ? 'Criando...' : 'Criar cliente'}
         </button>
       </form>
     </Modal>

@@ -33,11 +33,16 @@ export default function SiteDetailPage() {
     return <div className="text-slate-500">Local não encontrado.</div>;
   }
 
-  function handleRename() {
+  async function handleRename() {
     if (nome === location!.nome) return;
-    const result = updateLocation(location!.id, { nome });
+    const result = await updateLocation(location!.id, { nome });
     if (!result.ok) setEditError(result.error);
     else setEditError(null);
+  }
+
+  async function handleToggleLocationActive() {
+    const result = await setLocationActive(location!.id, !location!.ativo);
+    if (!result.ok) setEditError(result.error);
   }
 
   return (
@@ -60,7 +65,7 @@ export default function SiteDetailPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <span className="text-sm text-slate-500">{location.endereco ?? 'Endereço não informado'}</span>
           <button
-            onClick={() => setLocationActive(location.id, !location.ativo)}
+            onClick={handleToggleLocationActive}
             className={`text-sm font-semibold ${location.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
           >
             {location.ativo ? 'Inativar local' : 'Ativar local'}

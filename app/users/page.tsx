@@ -39,8 +39,14 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [modalUser, setModalUser] = useState<User | 'new' | null>(null);
   const [approvingRequest, setApprovingRequest] = useState<AccessRequest | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const pendingRequests = accessRequests.filter((r) => r.status === 'PENDENTE');
+
+  async function handleStatusChange(id: string, status: UserStatus) {
+    const result = await setUserStatus(id, status);
+    setStatusError(result.ok ? null : result.error);
+  }
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -69,6 +75,10 @@ export default function UsersPage() {
         <StatCard label="Técnicos" value={users.filter((u) => u.role === 'TECHNICIAN').length} />
         <StatCard label="Painel administrativo" value={users.filter((u) => u.role === 'ADMIN' || u.role === 'SUPERVISOR').length} tone="text-navy-700" />
       </div>
+
+      {statusError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-4">{statusError}</div>
+      )}
 
       {pendingRequests.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6">
@@ -147,7 +157,7 @@ export default function UsersPage() {
                 <td className="px-5 py-3 text-slate-600 truncate">{ROLE_LABEL[u.role]}</td>
                 <td className="px-5 py-3"><UserStatusBadge status={u.status} /></td>
                 <td className="px-5 py-3">
-                  <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => setUserStatus(u.id, s)} />
+                  <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
                 </td>
               </tr>
             ))}
@@ -166,7 +176,7 @@ export default function UsersPage() {
               </div>
               <div className="text-xs font-mono text-slate-500 mb-1">{u.email}</div>
               <div className="text-xs text-slate-500 mb-3">{ROLE_LABEL[u.role]}</div>
-              <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => setUserStatus(u.id, s)} />
+              <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
             </div>
           ))}
           {filtered.length === 0 && (
@@ -202,14 +212,17 @@ function ApproveRequestModal({
 }: {
   request: AccessRequest;
   onClose: () => void;
-  onApprove: (requestId: string, senha: string) => { ok: true } | { ok: false; error: string };
+  onApprove: (requestId: string, senha: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [senha, setSenha] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = onApprove(request.id, senha);
+    setLoading(true);
+    const result = await onApprove(request.id, senha);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -235,8 +248,8 @@ function ApproveRequestModal({
           />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
-        <button type="submit" className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1">
-          Aprovar e criar conta
+        <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
+          {loading ? 'Criando...' : 'Aprovar e criar conta'}
         </button>
       </form>
     </Modal>
@@ -268,18 +281,21 @@ function UserFormModal({
 }: {
   user: User | null;
   onClose: () => void;
-  onCreate: (nome: string, email: string, role: UserRole, senha: string) => { ok: true; id: string } | { ok: false; error: string };
-  onUpdate: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => { ok: true } | { ok: false; error: string };
+  onCreate: (nome: string, email: string, role: UserRole, senha: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  onUpdate: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [nome, setNome] = useState(user?.nome ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
   const [role, setRole] = useState<UserRole>(user?.role ?? 'SUPERVISOR');
   const [senha, setSenha] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = user ? onUpdate(user.id, { nome, email, role }) : onCreate(nome, email, role, senha);
+    setLoading(true);
+    const result = user ? await onUpdate(user.id, { nome, email, role }) : await onCreate(nome, email, role, senha);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -310,8 +326,8 @@ function UserFormModal({
           </Field>
         )}
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
-        <button type="submit" className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1">
-          {user ? 'Salvar alterações' : 'Criar usuário'}
+        <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
+          {loading ? 'Salvando...' : user ? 'Salvar alterações' : 'Criar usuário'}
         </button>
       </form>
     </Modal>

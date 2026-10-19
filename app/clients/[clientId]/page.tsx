@@ -27,14 +27,25 @@ export default function ClientDetailPage() {
   const [showNewLocation, setShowNewLocation] = useState(false);
   const [nome, setNome] = useState(client?.nome ?? '');
   const [editError, setEditError] = useState<string | null>(null);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
 
   if (!client) return <div className="text-slate-500">Cliente não encontrado.</div>;
 
-  function handleRename() {
+  async function handleRename() {
     if (nome === client!.nome) return;
-    const result = updateClient(client!.id, { nome });
+    const result = await updateClient(client!.id, { nome });
     if (!result.ok) setEditError(result.error);
     else setEditError(null);
+  }
+
+  async function handleToggleClientActive() {
+    const result = await setClientActive(client!.id, !client!.ativo);
+    if (!result.ok) setEditError(result.error);
+  }
+
+  async function handleToggleLocationActive(id: string, ativo: boolean) {
+    const result = await setLocationActive(id, ativo);
+    setLocationsError(result.ok ? null : result.error);
   }
 
   const equipmentCount = (localId: string) => equipment.filter((e) => e.localId === localId).length;
@@ -59,7 +70,7 @@ export default function ClientDetailPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <span className="text-sm text-slate-500 font-mono">{client.cnpj ?? 'CNPJ não informado'}</span>
           <button
-            onClick={() => setClientActive(client.id, !client.ativo)}
+            onClick={handleToggleClientActive}
             className={`text-sm font-semibold ${client.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
           >
             {client.ativo ? 'Inativar cliente' : 'Ativar cliente'}
@@ -73,6 +84,10 @@ export default function ClientDetailPage() {
           + Novo local
         </button>
       </div>
+
+      {locationsError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{locationsError}</div>
+      )}
 
       {locations.length === 0 ? (
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-400">
@@ -94,7 +109,7 @@ export default function ClientDetailPage() {
                   {equipmentCount(l.id)} equipamento{equipmentCount(l.id) === 1 ? '' : 's'}
                 </span>
                 <button
-                  onClick={() => setLocationActive(l.id, !l.ativo)}
+                  onClick={() => handleToggleLocationActive(l.id, !l.ativo)}
                   className={`text-xs font-semibold ${l.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
                 >
                   {l.ativo ? 'Inativar' : 'Ativar'}
@@ -119,15 +134,18 @@ function NewLocationModal({
 }: {
   clienteId: string;
   onClose: () => void;
-  onCreate: (clienteId: string, nome: string, endereco?: string) => { ok: true; id: string } | { ok: false; error: string };
+  onCreate: (clienteId: string, nome: string, endereco?: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
 }) {
   const [nome, setNome] = useState('');
   const [endereco, setEndereco] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = onCreate(clienteId, nome, endereco || undefined);
+    setLoading(true);
+    const result = await onCreate(clienteId, nome, endereco || undefined);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -145,8 +163,8 @@ function NewLocationModal({
           <input value={endereco} onChange={(e) => setEndereco(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
-        <button type="submit" className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1">
-          Criar local
+        <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
+          {loading ? 'Criando...' : 'Criar local'}
         </button>
       </form>
     </Modal>
