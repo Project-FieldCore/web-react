@@ -82,4 +82,66 @@ describe('http', () => {
     await expect(http.post('/auth/login', { email: 'a@a.com', senha: 'x' })).rejects.toBeInstanceOf(ApiError);
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('guarda o code da API no ApiError', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(401, { status: 401, code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' })
+    );
+
+    await expect(http.post('/auth/login', {})).rejects.toMatchObject({
+      status: 401,
+      code: 'INVALID_CREDENTIALS',
+      message: 'E-mail ou senha inválidos.',
+    });
+  });
+
+  it('traduz ACCOUNT_INACTIVE (403) para mensagem em português', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(403, { status: 403, code: 'ACCOUNT_INACTIVE', message: 'Account is inactive' })
+    );
+
+    await expect(http.post('/auth/login', {})).rejects.toMatchObject({
+      status: 403,
+      code: 'ACCOUNT_INACTIVE',
+      message: 'Este usuário está inativo ou bloqueado. Procure um administrador.',
+    });
+  });
+
+  it('403 sem code conhecido vira "sem permissão" e não desloga', async () => {
+    setAuthToken('token-123');
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(403, { status: 403, code: 'FORBIDDEN', message: 'Access denied' }));
+    const handler = vi.fn();
+    onUnauthorized(handler);
+
+    await expect(http.get('/users')).rejects.toMatchObject({
+      status: 403,
+      message: 'Você não tem permissão para realizar esta ação.',
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('erros de validação listam as mensagens dos fieldErrors', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(400, {
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        fieldErrors: [
+          { field: 'email', message: 'E-mail inválido.' },
+          { field: 'password', message: 'Senha obrigatória.' },
+        ],
+      })
+    );
+
+    await expect(http.post('/auth/login', {})).rejects.toMatchObject({
+      status: 400,
+      message: 'E-mail inválido. Senha obrigatória.',
+    });
+  });
+
+  it('resposta de erro sem corpo JSON usa o texto do status', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('boom', { status: 500, statusText: 'Internal Server Error' }));
+
+    await expect(http.get('/clients')).rejects.toMatchObject({ status: 500, message: 'Internal Server Error' });
+  });
 });

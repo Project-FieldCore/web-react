@@ -14,13 +14,16 @@ const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_BASE_URL).
 
 export class ApiError extends Error {
   status: number;
+  /** Código de erro da API (ErrorResponse.code), ex.: INVALID_CREDENTIALS. */
+  code?: string;
   details?: unknown;
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(message: string, status: number, details?: unknown, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.code = code;
   }
 }
 
@@ -40,15 +43,46 @@ interface RequestOptions {
   timeoutMs?: number;
 }
 
-async function parseErrorBody(response: Response): Promise<{ message: string; details?: unknown }> {
+interface ParsedError {
+  message: string;
+  code?: string;
+  details?: unknown;
+}
+
+/** Mensagens em português para os códigos conhecidos da API (ErrorResponse.code). */
+const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
+  INVALID_CREDENTIALS: 'E-mail ou senha inválidos.',
+  ACCOUNT_INACTIVE: 'Este usuário está inativo ou bloqueado. Procure um administrador.',
+};
+
+const FORBIDDEN_MESSAGE = 'Você não tem permissão para realizar esta ação.';
+
+/**
+ * Formato padrão de erro da API: { status, code, message, fieldErrors[] }.
+ * Códigos conhecidos e 403 viram mensagem em português; erros de validação
+ * (fieldErrors) listam os campos; o resto usa a mensagem da própria API.
+ */
+function friendlyMessage(status: number, code: string | undefined, apiMessage: string, fieldErrors: unknown): string {
+  if (code && ERROR_MESSAGES_BY_CODE[code]) return ERROR_MESSAGES_BY_CODE[code];
+  if (status === 403) return FORBIDDEN_MESSAGE;
+  if (Array.isArray(fieldErrors) && fieldErrors.length > 0) {
+    const messages = fieldErrors
+      .map((e) => (e && typeof e.message === 'string' ? e.message : null))
+      .filter((m): m is string => m !== null);
+    if (messages.length > 0) return messages.join(' ');
+  }
+  return apiMessage;
+}
+
+async function parseErrorBody(response: Response): Promise<ParsedError> {
+  const fallback = response.statusText || 'Erro inesperado na API.';
   try {
     const data = await response.json();
-    if (data && typeof data.message === 'string') {
-      return { message: data.message, details: data };
-    }
-    return { message: response.statusText || 'Erro inesperado na API.', details: data };
+    const code = data && typeof data.code === 'string' ? data.code : undefined;
+    const apiMessage = data && typeof data.message === 'string' ? data.message : fallback;
+    return { message: friendlyMessage(response.status, code, apiMessage, data?.fieldErrors), code, details: data };
   } catch {
-    return { message: response.statusText || 'Erro inesperado na API.' };
+    return { message: friendlyMessage(response.status, undefined, fallback, undefined) };
   }
 }
 
@@ -93,8 +127,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (response.status === 401 && token) {
       notifyUnauthorized();
     }
-    const { message, details } = await parseErrorBody(response);
-    throw new ApiError(message, response.status, details);
+    const { message, code, details } = await parseErrorBody(response);
+    throw new ApiError(message, response.status, details, code);
   }
 
   if (response.status === 204) {

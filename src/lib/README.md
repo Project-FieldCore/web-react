@@ -43,6 +43,16 @@ Métodos disponíveis: `http.get`, `http.post`, `http.put`, `http.patch`, `http.
   expirada: dispara `notifyUnauthorized()`, que o `app-store.ts` usa para
   deslogar o usuário. Um `401` sem token (ex.: login com credenciais erradas)
   não dispara isso — é só "credenciais inválidas".
+- O refresh token também fica em `auth-token.ts` e é usado no logout
+  (`POST /auth/logout` revoga o token no servidor). Quando o logout é causado
+  por um 401, ele é só local (`logout({ remote: false })`) — o token já é
+  inválido e a chamada remota entraria em 401 de novo.
+- Erros seguem o formato padrão da API (`{ status, code, message, fieldErrors }`).
+  `ApiError` expõe `status` e `code`; `http.ts` traduz `INVALID_CREDENTIALS` e
+  `ACCOUNT_INACTIVE`, troca qualquer outro `403` por "sem permissão" (e não
+  desloga — só o 401 com token desloga) e junta as mensagens de `fieldErrors`
+  em erros de validação.
+- Acesso por perfil nas rotas: `route-access.ts` (usado pelo `Shell.tsx`).
 
 ## Fluxo de login e sessão
 
@@ -51,24 +61,21 @@ Métodos disponíveis: `http.get`, `http.post`, `http.put`, `http.patch`, `http.
 
 1. Validação local (e-mail bem formado, senha não vazia) — evita bater na API
    com formulário incompleto.
-2. `POST /auth/login` via `http.post` → `{ token, user }`.
+2. `POST /auth/login` via `http.post` → `{ accessToken, refreshToken, user }`, convertido por `auth-api.ts` em `{ token, refreshToken, user }`.
 3. `ApiError`/`NetworkError` viram mensagem amigável e `{ ok: false }` — nada é
    persistido.
 4. Checks de `user.status`/`user.role` (RN-001/RN-003): quem decide de fato é
    a API, isso aqui só evita abrir o painel admin para quem não deveria estar
    nele. Se falhar, o token retornado é descartado (nunca chega a
    `setAuthToken`).
-5. Sucesso: `setAuthToken(token)` + `set({ currentUser: user })`.
+5. Sucesso: `setAuthToken(token)` + `setRefreshToken(refreshToken)` + `set({ currentUser: user })`.
 6. `logout()` (manual ou via 401 em qualquer requisição autenticada, ver
    seção acima) limpa os dois. O `Shell.tsx` observa `currentUser` e
    redireciona para `/login` assim que ele vira `null`.
 
-**Bloqueio conhecido:** `auth-api.ts` assume o contrato `POST /auth/login`
-mas o `fieldcore_backend` ainda não implementa esse endpoint (repo
-praticamente vazio no momento em que isso foi escrito). O código está pronto
-para consumir a API real, porém **não foi validado ponta a ponta** — só com
-os testes abaixo, que mockam `auth-api.ts`. Validar de novo assim que o
-endpoint existir.
+**Pendente:** o contrato (`POST /v1/auth/login`, `/auth/logout`) vem da branch
+`feature/email-password-authentication` do `api-java`, ainda não mergeada.
+Validar de ponta a ponta com a API rodando (`JWT_SECRET` com 32+ caracteres).
 
 ## Testes
 
@@ -77,6 +84,8 @@ endpoint existir.
 - `src/store/app-store.auth.test.ts` — `login`/`logout` do store (mockando
   `auth-api.ts`): sucesso, credenciais inválidas, erro de servidor, erro de
   rede, usuário inativo, perfil sem acesso, e o logout automático disparado
-  por uma sessão expirada.
+  por uma sessão expirada, e o logout (remoto, com falha da API e sem refresh token).
+- `src/lib/auth-api.test.ts` — contrato de login/logout com a API.
+- `src/lib/route-access.test.ts` — rotas permitidas por perfil.
 
 Rodar com `npm test`.

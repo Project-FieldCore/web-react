@@ -72,6 +72,18 @@ describe('useAppStore auth', () => {
     expect(result).toEqual({ ok: false, error: 'Serviço indisponível.' });
   });
 
+  it('mostra a mensagem em português de conta inativa (403 ACCOUNT_INACTIVE)', async () => {
+    mockApiLogin(
+      new ApiError('Este usuário está inativo ou bloqueado. Procure um administrador.', 403, undefined, 'ACCOUNT_INACTIVE')
+    );
+
+    const result = await useAppStore.getState().login('admin@fieldcore.com', 'senha123');
+
+    expect(result).toEqual({ ok: false, error: 'Este usuário está inativo ou bloqueado. Procure um administrador.' });
+    expect(useAppStore.getState().currentUser).toBeNull();
+    expect(getAuthToken()).toBeNull();
+  });
+
   it('mostra a mensagem de NetworkError quando a API está fora do ar', async () => {
     mockApiLogin(new NetworkError('Não foi possível conectar à API. Verifique sua conexão e tente novamente.'));
 
