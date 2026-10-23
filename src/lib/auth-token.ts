@@ -32,6 +32,29 @@ export function setAuthToken(token: string | null): void {
   }
 }
 
+const REFRESH_TOKEN_STORAGE_KEY = 'fieldcore-auth-refresh-token';
+
+let cachedRefreshToken: string | null | undefined;
+
+/** Necessário para o logout (POST /auth/logout revoga o refresh token no servidor). */
+export function getRefreshToken(): string | null {
+  if (cachedRefreshToken === undefined) {
+    cachedRefreshToken = storage()?.getItem(REFRESH_TOKEN_STORAGE_KEY) ?? null;
+  }
+  return cachedRefreshToken;
+}
+
+export function setRefreshToken(token: string | null): void {
+  cachedRefreshToken = token;
+  const store = storage();
+  if (!store) return;
+  if (token) {
+    store.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+  } else {
+    store.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  }
+}
+
 type UnauthorizedHandler = () => void;
 let unauthorizedHandler: UnauthorizedHandler | null = null;
 

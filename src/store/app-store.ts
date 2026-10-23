@@ -35,14 +35,14 @@ import {
   MOCK_MODELS,
   MOCK_USERS,
 } from '@/data/mock-data';
-import { login as apiLogin } from '@/lib/auth-api';
+import { login as apiLogin, logout as apiLogout } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
-import { onUnauthorized, setAuthToken } from '@/lib/auth-token';
+import { getRefreshToken, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
 
 /** Erro de API/rede vira mensagem amigável — mesmo contrato usado pelo login (ver #131/#132). */
 function toErrorResult(error: unknown, fallback: string): { ok: false; error: string } {
@@ -58,7 +58,8 @@ interface AppState {
   // --- sessão (UC-01) ---
   currentUser: User | null;
   login: (email: string, senha: string) => Promise<Result>;
-  logout: () => void;
+  /** `remote: false` só limpa a sessão local (ex.: token já expirado/inválido). */
+  logout: (options?: { remote?: boolean }) => void;
   /** RN-007: nunca revela se o e-mail existe — sempre retorna ok. Só troca a senha de fato quando encontra uma conta ativa. */
   resetPassword: (email: string, novaSenha: string) => Result;
 
@@ -251,10 +252,12 @@ export const useAppStore = create<AppState>()(
       if (!senha.trim()) return { ok: false, error: 'Informe sua senha.' };
 
       let token: string;
+      let refreshToken: string;
       let user: User;
       try {
         const response = await apiLogin(normalized, senha);
         token = response.token;
+        refreshToken = response.refreshToken;
         user = response.user;
       } catch (error) {
         if (error instanceof ApiError) {
@@ -271,15 +274,24 @@ export const useAppStore = create<AppState>()(
         return { ok: false, error: 'Este perfil não tem acesso à interface administrativa web.' };
       }
       setAuthToken(token);
+      setRefreshToken(refreshToken);
       set({ currentUser: user });
       pushAudit('ACESSOU', 'Sessão', user.id, 'Login no painel administrativo');
       return { ok: true };
     },
 
-    logout: () => {
+    logout: ({ remote = true } = {}) => {
       const user = get().currentUser;
       if (user) pushAudit('SAIU', 'Sessão', user.id, 'Logout do painel administrativo');
+      const refreshToken = getRefreshToken();
+      // Revoga o refresh token na API. A chamada lê o access token de forma
+      // síncrona ao ser disparada, antes de a sessão local ser limpa abaixo.
+      // Falha de rede/API não impede o logout local (fire-and-forget).
+      if (remote && refreshToken) {
+        apiLogout(refreshToken).catch(() => {});
+      }
       setAuthToken(null);
+      setRefreshToken(null);
       set({ currentUser: null });
     },
 
@@ -845,6 +857,7 @@ export const useAppStore = create<AppState>()(
 
 // Sessão expirada (401 numa requisição autenticada) — desloga e deixa o
 // Shell redirecionar ao login, como um refresh normal de página faria.
+// Sem chamar a API: o token já é inválido e o logout remoto entraria em 401 de novo.
 onUnauthorized(() => {
-  useAppStore.getState().logout();
+  useAppStore.getState().logout({ remote: false });
 });
