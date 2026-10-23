@@ -10,10 +10,10 @@ precisa desse prefixo para chegar ao browser). Copie `.env.local.example` para
 `.env.local` (não versionado) e ajuste por ambiente:
 
 ```
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api/v1
 ```
 
-Sem essa variável, cai no default `http://localhost:8080/api` (uso local).
+Sem essa variável, cai no default `http://localhost:8080/api/v1` (uso local).
 
 ## Uso
 

@@ -7,7 +7,7 @@
 
 import { getAuthToken, notifyUnauthorized } from './auth-token';
 
-const DEFAULT_BASE_URL = 'http://localhost:8080/api';
+const DEFAULT_BASE_URL = 'http://localhost:8080/api/v1';
 const DEFAULT_TIMEOUT_MS = 15000;
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
@@ -101,7 +101,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  // Rotas void da API (ex.: logout) respondem 200 sem corpo.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const http = {
