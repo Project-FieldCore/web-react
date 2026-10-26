@@ -5,7 +5,7 @@
  * status de erro, NetworkError para falha de conexão/timeout).
  */
 
-import { getAuthToken, notifyUnauthorized } from './auth-token';
+import { getAuthToken, notifyUnauthorized, refreshSession } from './auth-token';
 
 const DEFAULT_BASE_URL = 'http://localhost:8080/api/v1';
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -41,6 +41,10 @@ interface RequestOptions {
   body?: unknown;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /** Não envia o token de sessão nem trata 401 como sessão expirada (ex.: /auth/refresh). */
+  anonymous?: boolean;
+  /** Não tenta renovar a sessão em 401 (ex.: /auth/logout, e a repetição após um refresh). */
+  skipRefresh?: boolean;
 }
 
 interface ParsedError {
@@ -87,7 +91,7 @@ async function parseErrorBody(response: Response): Promise<ParsedError> {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, headers, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { method = 'GET', body, headers, timeoutMs = DEFAULT_TIMEOUT_MS, anonymous = false, skipRefresh = false } = options;
 
   const controller = new AbortController();
   const timedOut = { current: false };
@@ -96,7 +100,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     controller.abort();
   }, timeoutMs);
 
-  const token = getAuthToken();
+  const token = anonymous ? null : getAuthToken();
 
   let response: Response;
   try {
@@ -125,6 +129,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // Só trata como sessão expirada quando a própria requisição já levava um
     // token — um 401 de login (sem token) é só "credenciais inválidas".
     if (response.status === 401 && token) {
+      if (!skipRefresh) {
+        // Se outra requisição já renovou o token enquanto esta estava em voo,
+        // basta repetir com o token novo; senão, renova (uma vez por vez).
+        const current = getAuthToken();
+        const renewed = current !== null && current !== token ? true : await refreshSession();
+        // Repete uma única vez; um novo 401 aqui encerra a sessão (skipRefresh).
+        if (renewed) return request<T>(path, { ...options, skipRefresh: true });
+      }
       notifyUnauthorized();
     }
     const { message, code, details } = await parseErrorBody(response);

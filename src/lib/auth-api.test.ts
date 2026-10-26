@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { login, logout } from './auth-api';
+import { login, logout, refresh } from './auth-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -56,5 +56,28 @@ describe('auth-api login', () => {
     expect(url).toMatch(/\/auth\/logout$/);
     expect(init.headers.Authorization).toBe('Bearer jwt-abc');
     expect(JSON.parse(init.body)).toEqual({ refreshToken: 'refresh-xyz' });
+  });
+
+  it('refresh envia o refreshToken sem o access token e mapeia o TokenResponse', async () => {
+    setAuthToken('jwt-expirado');
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        accessToken: 'jwt-novo',
+        refreshToken: 'refresh-novo',
+        expiresIn: 900,
+        user: { id: 'usr-1', name: 'Admin', email: 'admin@fieldcore.com', role: 'ADMIN' },
+      })
+    );
+    global.fetch = fetchMock;
+
+    const result = await refresh('refresh-antigo');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/auth\/refresh$/);
+    expect(init.headers.Authorization).toBeUndefined();
+    expect(JSON.parse(init.body)).toEqual({ refreshToken: 'refresh-antigo' });
+    expect(result.token).toBe('jwt-novo');
+    expect(result.refreshToken).toBe('refresh-novo');
+    expect(result.user.nome).toBe('Admin');
   });
 });

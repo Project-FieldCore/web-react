@@ -35,14 +35,14 @@ import {
   MOCK_MODELS,
   MOCK_USERS,
 } from '@/data/mock-data';
-import { login as apiLogin, logout as apiLogout } from '@/lib/auth-api';
+import { login as apiLogin, logout as apiLogout, refresh as apiRefresh } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
-import { getRefreshToken, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
+import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
 
 /** Erro de API/rede vira mensagem amigável — mesmo contrato usado pelo login (ver #131/#132). */
 function toErrorResult(error: unknown, fallback: string): { ok: false; error: string } {
@@ -860,4 +860,21 @@ export const useAppStore = create<AppState>()(
 // Sem chamar a API: o token já é inválido e o logout remoto entraria em 401 de novo.
 onUnauthorized(() => {
   useAppStore.getState().logout({ remote: false });
+});
+
+// Access token expirado (401): renova com o refresh token, sem pedir login de
+// novo. Refresh inválido/expirado/revogado → false (o http.ts encerra a sessão);
+// erro de rede propaga e não derruba a sessão.
+onRefresh(async () => {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  try {
+    const renewed = await apiRefresh(refreshToken);
+    setAuthToken(renewed.token);
+    setRefreshToken(renewed.refreshToken);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiError) return false;
+    throw error;
+  }
 });

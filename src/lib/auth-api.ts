@@ -29,8 +29,7 @@ export interface LoginResponse {
  * A API só emite token para usuário ACTIVE, então o status do usuário
  * retornado é sempre ATIVO (conta inativa chega como 403, não como 200).
  */
-export async function login(email: string, password: string): Promise<LoginResponse> {
-  const response = await http.post<TokenResponse>('/auth/login', { email, password });
+function toLoginResponse(response: TokenResponse): LoginResponse {
   return {
     token: response.accessToken,
     refreshToken: response.refreshToken,
@@ -44,10 +43,26 @@ export async function login(email: string, password: string): Promise<LoginRespo
   };
 }
 
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  return toLoginResponse(await http.post<TokenResponse>('/auth/login', { email, password }));
+}
+
+/**
+ * POST /v1/auth/refresh { refreshToken } -> 200 TokenResponse | 401 INVALID_CREDENTIALS
+ * Rotativo: devolve um refresh token novo e revoga o enviado. Reusar um refresh
+ * token já rotacionado revoga toda a família (a API trata como roubo).
+ * `anonymous`: rota pública, não deve levar o access token (já expirado).
+ */
+export async function refresh(refreshToken: string): Promise<LoginResponse> {
+  return toLoginResponse(
+    await http.post<TokenResponse>('/auth/refresh', { refreshToken }, { anonymous: true })
+  );
+}
+
 /**
  * POST /v1/auth/logout { refreshToken } -> 200 (sem corpo). Exige o access
  * token no header (a rota não é pública) e revoga o refresh token.
  */
 export function logout(refreshToken: string): Promise<void> {
-  return http.post<void>('/auth/logout', { refreshToken });
+  return http.post<void>('/auth/logout', { refreshToken }, { skipRefresh: true });
 }
