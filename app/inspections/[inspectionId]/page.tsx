@@ -26,7 +26,6 @@ export default function InspectionReviewPage() {
   const locations = useAppStore((s) => s.locations);
   const equipment = useAppStore((s) => s.equipment);
   const users = useAppStore((s) => s.users);
-  const currentUser = useAppStore((s) => s.currentUser);
   const startReview = useAppStore((s) => s.startReview);
   const approveInspection = useAppStore((s) => s.approveInspection);
   const rejectInspection = useAppStore((s) => s.rejectInspection);
