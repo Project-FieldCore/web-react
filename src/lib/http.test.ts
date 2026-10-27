@@ -107,6 +107,16 @@ describe('http', () => {
     });
   });
 
+  it('409 genérico (CONFLICT) vira mensagem em português, não "Conflict"', async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(409, { status: 409, code: 'CONFLICT', message: 'Conflict' }));
+
+    await expect(http.post('/users', {})).rejects.toMatchObject({
+      status: 409,
+      code: 'CONFLICT',
+      message: 'Não foi possível salvar: os dados conflitam com um registro existente.',
+    });
+  });
+
   it('403 sem code conhecido vira "sem permissão" e não desloga', async () => {
     setAuthToken('token-123');
     global.fetch = vi.fn().mockResolvedValue(jsonResponse(403, { status: 403, code: 'FORBIDDEN', message: 'Access denied' }));

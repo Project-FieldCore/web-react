@@ -67,6 +67,10 @@ interface AppState {
   locations: Location[];
   equipment: Equipment[];
   users: User[];
+  /** Carga da lista de usuários pela API (tela /users). */
+  usersStatus: 'idle' | 'loading' | 'ready' | 'error';
+  usersError: string | null;
+  loadUsers: () => Promise<void>;
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
@@ -159,6 +163,9 @@ function newId(prefix: string) {
   return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+/** Mínimo exigido pela API para a senha de um novo usuário. */
+const MIN_PASSWORD_LENGTH = 8;
+
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
@@ -203,6 +210,14 @@ export const useAppStore = create<AppState>()(
   const replaceModel = (model: InspectionModel) =>
     set((s) => ({ models: s.models.map((m) => (m.id === model.id ? model : m)) }));
 
+  // Edição concorrente (409 VERSION_CONFLICT): recarrega para a tela mostrar o
+  // estado atual e o `version` certo na próxima tentativa.
+  async function reloadOnVersionConflict(error: unknown) {
+    if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+      await get().loadUsers();
+    }
+  }
+
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
   // Integrado à API (#133) — ver src/lib/users-api.ts para o contrato assumido.
@@ -215,6 +230,9 @@ export const useAppStore = create<AppState>()(
     const duplicate = get().users.some((u) => u.email.toLowerCase() === normalized);
     if (duplicate) return { ok: false, error: 'Já existe um usuário com esse e-mail.' };
     if (!senha.trim()) return { ok: false, error: 'Defina uma senha inicial.' };
+    if (senha.length < MIN_PASSWORD_LENGTH) {
+      return { ok: false, error: `A senha inicial deve ter ao menos ${MIN_PASSWORD_LENGTH} caracteres.` };
+    }
 
     let user: User;
     try {
@@ -233,6 +251,8 @@ export const useAppStore = create<AppState>()(
     locations: MOCK_LOCATIONS,
     equipment: MOCK_EQUIPMENT,
     users: MOCK_USERS,
+    usersStatus: 'idle',
+    usersError: null,
     models: MOCK_MODELS,
     inspections: MOCK_INSPECTIONS,
     auditEvents: MOCK_AUDIT_EVENTS,
@@ -423,6 +443,20 @@ export const useAppStore = create<AppState>()(
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Equipamento', id);
     },
 
+    // Substitui a lista pelo cadastro real da API (somente ADMIN). Até a carga
+    // terminar, a tela /users mostra loading — nunca os dados de exemplo.
+    loadUsers: async () => {
+      // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
+      if (get().usersStatus !== 'ready') set({ usersStatus: 'loading', usersError: null });
+      try {
+        const users = await usersApi.listUsers();
+        set({ users, usersStatus: 'ready', usersError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os usuários. Tente novamente.');
+        set({ usersStatus: 'error', usersError: message });
+      }
+    },
+
     // Cadastro central de usuários — evita a duplicidade de registros que hoje frustra a Ana (03 - Problema).
     createUser: async (nome, email, role, senha) => {
       const result = await createUserInternal(nome, email, role, senha);
@@ -438,10 +472,13 @@ export const useAppStore = create<AppState>()(
         if (duplicate) return { ok: false, error: 'Já existe um usuário com esse e-mail.' };
         patch = { ...patch, email: normalized };
       }
+      const version = get().users.find((u) => u.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de usuários e tente de novo.' };
       let user: User;
       try {
-        user = await usersApi.updateUser(id, patch);
+        user = await usersApi.updateUser(id, patch, version);
       } catch (error) {
+        await reloadOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
       }
       set((s) => ({ users: s.users.map((u) => (u.id === id ? user : u)) }));
@@ -450,10 +487,13 @@ export const useAppStore = create<AppState>()(
     },
     // RN-002: inativação não exclui histórico — por isso não existe "excluir usuário".
     setUserStatus: async (id, status) => {
+      const version = get().users.find((u) => u.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de usuários e tente de novo.' };
       let user: User;
       try {
-        user = await usersApi.setUserStatus(id, status);
+        user = await usersApi.setUserStatus(id, status, version);
       } catch (error) {
+        await reloadOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível alterar o status. Tente novamente.');
       }
       set((s) => ({ users: s.users.map((u) => (u.id === id ? user : u)) }));
