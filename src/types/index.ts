@@ -72,6 +72,9 @@ export interface User {
   email: string;
   role: UserRole;
   status: UserStatus;
+  /** Versão da API (trava otimista): obrigatória para editar e mudar status. */
+  version?: number;
+  phone?: string;
 }
 
 export interface Client {
