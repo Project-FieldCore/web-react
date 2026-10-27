@@ -43,6 +43,18 @@ Métodos disponíveis: `http.get`, `http.post`, `http.put`, `http.patch`, `http.
   expirada: dispara `notifyUnauthorized()`, que o `app-store.ts` usa para
   deslogar o usuário. Um `401` sem token (ex.: login com credenciais erradas)
   não dispara isso — é só "credenciais inválidas".
+- **Renovação automática (PBI-0010.1):** um `401` numa requisição que levava
+  token primeiro tenta `POST /auth/refresh` (via `refreshSession()` de
+  `auth-token.ts`, com o handler registrado pelo `app-store.ts`), salva os
+  dois tokens novos e **repete a requisição uma única vez**. Só se o refresh
+  falhar (ou a repetição também der 401) a sessão é encerrada. A API rotaciona
+  o refresh token a cada uso e trata o reuso de um antigo como roubo (revoga a
+  família inteira), por isso: só uma renovação por vez (requisições simultâneas
+  compartilham o mesmo refresh) e uma requisição que chega com 401 depois de
+  outra já ter renovado só repete com o token novo. Erro de rede no refresh não
+  derruba a sessão. Opções de `request`: `anonymous` (não envia o token, usada
+  no `/auth/refresh`) e `skipRefresh` (usada no `/auth/logout`: com o access
+  token expirado o logout é só local).
 - O refresh token também fica em `auth-token.ts` e é usado no logout
   (`POST /auth/logout` revoga o token no servidor). Quando o logout é causado
   por um 401, ele é só local (`logout({ remote: false })`) — o token já é

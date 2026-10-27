@@ -66,3 +66,33 @@ export function onUnauthorized(handler: UnauthorizedHandler): void {
 export function notifyUnauthorized(): void {
   unauthorizedHandler?.();
 }
+
+/**
+ * Renovação silenciosa da sessão (PBI-0010.1). O app-store registra o handler
+ * (chama POST /auth/refresh e salva os dois tokens novos); o http.ts o usa ao
+ * receber 401. Fica aqui, e não no http.ts, pelo mesmo motivo do token: evitar
+ * import circular. O handler devolve `false` quando o refresh token não vale
+ * mais e deixa propagar erros de rede (uma queda de conexão não derruba a sessão).
+ */
+type RefreshHandler = () => Promise<boolean>;
+let refreshHandler: RefreshHandler | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function onRefresh(handler: RefreshHandler | null): void {
+  refreshHandler = handler;
+}
+
+/**
+ * Uma única renovação por vez: a API rotaciona o refresh token a cada uso e
+ * trata o reuso de um token antigo como roubo (revoga a família inteira), então
+ * requisições simultâneas com 401 precisam compartilhar o mesmo refresh.
+ */
+export function refreshSession(): Promise<boolean> {
+  if (!refreshHandler || !getRefreshToken()) return Promise.resolve(false);
+  if (!refreshInFlight) {
+    refreshInFlight = refreshHandler().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}

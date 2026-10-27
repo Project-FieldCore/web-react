@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, NetworkError, http } from './http';
-import { onUnauthorized, setAuthToken } from './auth-token';
+import { getAuthToken, getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -14,6 +14,8 @@ describe('http', () => {
 
   beforeEach(() => {
     setAuthToken(null);
+    setRefreshToken(null);
+    onRefresh(null);
   });
 
   afterEach(() => {
@@ -143,5 +145,168 @@ describe('http', () => {
     global.fetch = vi.fn().mockResolvedValue(new Response('boom', { status: 500, statusText: 'Internal Server Error' }));
 
     await expect(http.get('/clients')).rejects.toMatchObject({ status: 500, message: 'Internal Server Error' });
+  });
+
+  describe('renovação automática da sessão (401 com token)', () => {
+    /** Simula a API: só aceita o token 'novo'; qualquer outro recebe 401. */
+    function apiAcceptingOnly(valid: string) {
+      return vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const auth = (init.headers as Record<string, string>).Authorization;
+        return auth === `Bearer ${valid}` ? jsonResponse(200, { ok: true }) : jsonResponse(401, { message: 'Unauthorized' });
+      });
+    }
+
+    function renewingTo(token: string, refreshToken: string) {
+      return vi.fn().mockImplementation(async () => {
+        setAuthToken(token);
+        setRefreshToken(refreshToken);
+        return true;
+      });
+    }
+
+    it('renova a sessão e repete a requisição com o token novo', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = apiAcceptingOnly('novo');
+      const refresh = renewingTo('novo', 'refresh-2');
+      onRefresh(refresh);
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      const result = await http.get('/clients');
+
+      expect(result).toEqual({ ok: true });
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(getAuthToken()).toBe('novo');
+      expect(getRefreshToken()).toBe('refresh-2');
+      expect(unauthorized).not.toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('requisições simultâneas com 401 compartilham uma única renovação', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = apiAcceptingOnly('novo');
+      const refresh = renewingTo('novo', 'refresh-2');
+      onRefresh(refresh);
+
+      const results = await Promise.all([http.get('/a'), http.get('/b'), http.get('/c')]);
+
+      expect(results).toHaveLength(3);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('requisição que chega com 401 depois de outra já ter renovado só repete, sem novo refresh', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const refresh = vi.fn().mockImplementation(async () => {
+        setAuthToken('novo');
+        setRefreshToken('refresh-2');
+        return true;
+      });
+      onRefresh(refresh);
+      global.fetch = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        const auth = (init.headers as Record<string, string>).Authorization;
+        if (auth === 'Bearer novo') return jsonResponse(200, { ok: true });
+        await gate; // esta resposta 401 só chega depois da renovação
+        return jsonResponse(401, { message: 'Unauthorized' });
+      });
+
+      const first = http.get('/a');
+      const second = http.get('/b');
+      await Promise.resolve();
+      release();
+      await Promise.all([first, second]);
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('se o refresh falha, encerra a sessão e propaga o 401', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = apiAcceptingOnly('novo');
+      onRefresh(vi.fn().mockResolvedValue(false));
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      await expect(http.get('/clients')).rejects.toMatchObject({ status: 401 });
+      expect(unauthorized).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('se a repetição também recebe 401, encerra a sessão sem entrar em loop', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = apiAcceptingOnly('nunca-aceito');
+      const refresh = renewingTo('novo', 'refresh-2');
+      onRefresh(refresh);
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      await expect(http.get('/clients')).rejects.toMatchObject({ status: 401 });
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(unauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('sem refresh token salvo, não tenta renovar e encerra a sessão', async () => {
+      setAuthToken('expirado');
+      global.fetch = apiAcceptingOnly('novo');
+      const refresh = vi.fn().mockResolvedValue(true);
+      onRefresh(refresh);
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      await expect(http.get('/clients')).rejects.toMatchObject({ status: 401 });
+      expect(refresh).not.toHaveBeenCalled();
+      expect(unauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it('erro de rede durante o refresh propaga e não encerra a sessão', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = apiAcceptingOnly('novo');
+      onRefresh(vi.fn().mockRejectedValue(new NetworkError()));
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      await expect(http.get('/clients')).rejects.toBeInstanceOf(NetworkError);
+      expect(unauthorized).not.toHaveBeenCalled();
+    });
+
+    it('401 sem token (login) não tenta renovar', async () => {
+      setRefreshToken('refresh-1');
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(401, { message: 'Invalid' }));
+      const refresh = vi.fn().mockResolvedValue(true);
+      onRefresh(refresh);
+
+      await expect(http.post('/auth/login', {})).rejects.toBeInstanceOf(ApiError);
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('skipRefresh: 401 encerra a sessão sem renovar (ex.: logout)', async () => {
+      setAuthToken('expirado');
+      setRefreshToken('refresh-1');
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(401, { message: 'Unauthorized' }));
+      const refresh = vi.fn().mockResolvedValue(true);
+      onRefresh(refresh);
+
+      await expect(http.post('/auth/logout', {}, { skipRefresh: true })).rejects.toBeInstanceOf(ApiError);
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('anonymous: não envia o token e não trata 401 como sessão expirada', async () => {
+      setAuthToken('expirado');
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(401, { message: 'Invalid' }));
+      global.fetch = fetchMock;
+      const unauthorized = vi.fn();
+      onUnauthorized(unauthorized);
+
+      await expect(http.post('/auth/refresh', {}, { anonymous: true })).rejects.toMatchObject({ status: 401 });
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+      expect(unauthorized).not.toHaveBeenCalled();
+    });
   });
 });
