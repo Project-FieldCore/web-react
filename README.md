@@ -11,6 +11,14 @@ Especificação do produto, gestão e convenções (fonte canônica):
 - Branches, commits, issues e PRs: [BRANCH_COMMIT_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/main/PROJECT_MANAGEMENT/BRANCH_COMMIT_CONVENTION.md)
 - Backlog / DoD: Notion export em `docs` (páginas 15–18)
 
+## Mocks OpenAPI (cadastros)
+
+Cadastros de seed (`users` / `clients` / `sites` / `equipment`) vêm de
+`src/data/openapi/fieldops-v1.json` (cópia do mock canônico da API) via
+`src/data/contract-mocks.ts`. Credenciais de demo local ficam em
+`src/data/demo-credentials.ts` (fora do contrato). Modelos/inspeções de UI
+continuam como demo local com FKs apontando para os UUIDs do contrato.
+
 ## Qualidade / CI
 
 ```bash

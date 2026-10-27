@@ -26,7 +26,6 @@ import { isAnswerFilled } from '@/types';
 import {
   MOCK_ACCESS_REQUESTS,
   MOCK_CLIENTS,
-  MOCK_CREDENTIALS,
   MOCK_EQUIPMENT,
   MOCK_AUDIT_EVENTS,
   MOCK_INSPECTIONS,
@@ -34,6 +33,7 @@ import {
   MOCK_MODELS,
   MOCK_USERS,
 } from '@/data/mock-data';
+import { DEMO_CREDENTIALS } from '@/data/demo-credentials';
 import { login as apiLogin, logout as apiLogout, refresh as apiRefresh } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
@@ -326,7 +326,7 @@ export const useAppStore = create<AppState>()(
         (u) => u.email.toLowerCase() === normalized && (u.role === 'ADMIN' || u.role === 'SUPERVISOR')
       );
       if (user && user.status === 'ATIVO') {
-        MOCK_CREDENTIALS[normalized] = novaSenha;
+        DEMO_CREDENTIALS[normalized] = novaSenha;
         pushAudit('REDEFINIU_SENHA', 'Usuário', user.id, 'Recuperação de senha');
       }
       return { ok: true };

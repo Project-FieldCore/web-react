@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import type { Client, Location, User } from '@/types';
+import { CONTRACT_IDS } from '@/data/contract-mocks';
 
 vi.mock('@/lib/clients-api', () => ({
   createClient: vi.fn(),
@@ -28,7 +29,7 @@ function mocked<T extends (...args: never[]) => unknown>(fn: T) {
   return fn as unknown as ReturnType<typeof vi.fn>;
 }
 
-const EXISTING_CLIENT_ID = 'cli-1';
+const EXISTING_CLIENT_ID = CONTRACT_IDS.client;
 
 describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
   beforeEach(() => {
@@ -70,7 +71,7 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
     });
 
     it('setClientActive atualiza o cliente com a resposta da API', async () => {
-      const updated: Client = { id: EXISTING_CLIENT_ID, nome: 'Grupo Sorocaba Alimentos', ativo: false };
+      const updated: Client = { id: EXISTING_CLIENT_ID, nome: 'Industria ABC', ativo: false };
       mocked(clientsApi.setClientActive).mockResolvedValue(updated);
 
       const result = await useAppStore.getState().setClientActive(EXISTING_CLIENT_ID, false);
@@ -111,7 +112,7 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
     it('updateLocation propaga erro de rede', async () => {
       mocked(locationsApi.updateLocation).mockRejectedValue(new NetworkError('Sem conexão.'));
 
-      const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Novo nome' });
+      const result = await useAppStore.getState().updateLocation(CONTRACT_IDS.site, { nome: 'Novo nome' });
 
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
     });

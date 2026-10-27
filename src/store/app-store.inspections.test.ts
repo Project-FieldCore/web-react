@@ -2,7 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import { MOCK_INSPECTIONS, MOCK_MODELS, MOCK_USERS } from '@/data/mock-data';
-import type { Inspection } from '@/types';
+import { CONTRACT_IDS } from '@/data/contract-mocks';
+import type { Inspection, User } from '@/types';
+
+/** Fixture local de teste (não está no mock OpenAPI — contrato só traz SUPERVISOR). */
+const DEMO_TECHNICIAN: User = {
+  id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  nome: 'Demo Technician',
+  email: 'tec.demo@example.com',
+  role: 'TECHNICIAN',
+  status: 'ATIVO',
+};
 
 vi.mock('@/lib/inspections-api', () => ({
   scheduleInspection: vi.fn(),
@@ -46,7 +56,7 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     useAppStore.setState({
       inspections: structuredClone(MOCK_INSPECTIONS),
       models: structuredClone(MOCK_MODELS),
-      users: structuredClone(MOCK_USERS),
+      users: [...structuredClone(MOCK_USERS), structuredClone(DEMO_TECHNICIAN)],
       syncQueue: [],
       syncing: false,
       lastSyncAt: null,
@@ -56,9 +66,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
   describe('scheduleInspection', () => {
     const input = {
       modeloId: 'mod-1',
-      clienteId: 'cli-1',
-      localId: 'loc-1',
-      tecnicoId: 'tec-1',
+      clienteId: CONTRACT_IDS.client,
+      localId: CONTRACT_IDS.site,
+      tecnicoId: DEMO_TECHNICIAN.id,
       prioridade: 'ALTA' as const,
       dataPrevista: '2026-11-01T10:00:00.000Z',
     };
