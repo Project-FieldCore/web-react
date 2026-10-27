@@ -10,6 +10,17 @@ Especificação do produto, gestão e convenções (fonte canônica):
 - Branches, commits, issues e PRs: [BRANCH_COMMIT_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/docs/structure/PROJECT_MANAGEMENT/BRANCH_COMMIT_CONVENTION.md)
 - Backlog / DoD: Notion export em `docs` (páginas 15–18)
 
+## Qualidade / CI
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Detalhes do workflow GitHub Actions: [docs/CI.md](docs/CI.md). Convenção dos 3 repos: [CI_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/main/PROJECT_MANAGEMENT/CI_CONVENTION.md).
+
 ## Git
 
-Segue a convenção do projeto em [BRANCH_COMMIT_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/docs/structure/PROJECT_MANAGEMENT/BRANCH_COMMIT_CONVENTION.md) (branches `tipo/PBI-XXXX-…`, base `develop` neste repo, commits `:gitmoji: type: …`, PRs `[PBI-XXXX] …`).
+Segue a convenção do projeto em [BRANCH_COMMIT_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/main/PROJECT_MANAGEMENT/BRANCH_COMMIT_CONVENTION.md) (branches `tipo/PBI-XXXX-…`, base `develop` neste repo, commits `:gitmoji: type: …`, PRs `[PBI-XXXX] …`).

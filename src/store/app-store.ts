@@ -7,7 +7,6 @@ import type {
   Answer,
   AuditEvent,
   Client,
-  CorrectionFeedback,
   Criticidade,
   Equipment,
   Geolocalizacao,
