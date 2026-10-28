@@ -1,9 +1,11 @@
 import { http } from './http';
+import { buildQueryString, fetchAllPages, listParams, type ListQuery, type Paged } from './paged-list';
 import type { Client } from '@/types';
 
 /**
  * Contrato real da API (openapi/fieldops-v1.yaml + ClientController, ADMIN e SUPERVISOR):
- *   GET   /clients?page&size          -> { items: Client[], page: { page, size, totalElements, totalPages } }
+ *   GET   /clients?page&size&sort&q&status -> { items: Client[], page: { page, size, totalElements, totalPages } }
+ *         sort: name | createdAt ("campo,asc|desc"); q busca nome, razão social, CNPJ e e-mail
  *   POST  /clients                    -> 201 Client          (409 DOCUMENT_ALREADY_EXISTS)
  *   PATCH /clients/{id}               -> Client  { name, legalName, document, email, phone, version }  (409 VERSION_CONFLICT)
  *   PATCH /clients/{id}/status        -> Client  { status: ACTIVE | INACTIVE, version }
@@ -36,20 +38,29 @@ function toClient(client: ApiClient): Client {
   };
 }
 
-const PAGE_SIZE = 100; // máximo aceito pela API
+/** Filtros explícitos da listagem de clientes (undefined = sem filtro). */
+export interface ClientFilters {
+  ativo?: boolean;
+}
 
-/** Busca todas as páginas — o cadastro é pequeno e a tela filtra/busca localmente. */
+/** Uma página da listagem, com busca, filtro e ordenação feitos na API. */
+export async function searchClients(query: ListQuery<ClientFilters>): Promise<Paged<Client>> {
+  const { ativo } = query.filters;
+  const response = await http.get<ApiClientPage>(
+    `/clients${buildQueryString({
+      ...listParams(query),
+      status: ativo === undefined ? undefined : ativo ? 'ACTIVE' : 'INACTIVE',
+    })}`
+  );
+  return { items: response.items.map(toClient), page: response.page };
+}
+
+/** Todos os clientes (todas as páginas) — para seletores, nomes e para manter o `version` no store. */
 export async function listClients(): Promise<Client[]> {
-  const clients: Client[] = [];
-  let page = 0;
-  let totalPages = 1;
-  while (page < totalPages) {
-    const response = await http.get<ApiClientPage>(`/clients?page=${page}&size=${PAGE_SIZE}`);
-    clients.push(...response.items.map(toClient));
-    totalPages = response.page.totalPages;
-    page += 1;
-  }
-  return clients;
+  return fetchAllPages(async (page, size) => {
+    const response = await http.get<ApiClientPage>(`/clients${buildQueryString({ page, size })}`);
+    return { items: response.items.map(toClient), page: response.page };
+  });
 }
 
 export async function createClient(nome: string, cnpj?: string): Promise<Client> {

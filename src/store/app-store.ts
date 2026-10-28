@@ -39,6 +39,7 @@ import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
+import type { NewModelInput } from '@/lib/models-api';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
@@ -78,6 +79,13 @@ interface AppState {
   usersStatus: 'idle' | 'loading' | 'ready' | 'error';
   usersError: string | null;
   loadUsers: () => Promise<void>;
+  /**
+   * As listagens paginadas buscam só uma página; estas ações levam os itens
+   * dela para o store (por id), para editar/mudar status usar o `version` mais recente.
+   */
+  mergeUsers: (items: User[]) => void;
+  mergeClients: (items: Client[]) => void;
+  mergeLocations: (items: Location[]) => void;
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
@@ -119,7 +127,16 @@ interface AppState {
   // --- modelos (UC-04, UC-05) — integrados à API (#134). As edições do
   // construtor (meta/seções/itens) mexem só no rascunho local; `saveModel`,
   // `publishModel` e `createDraftModel` é que falam com a API. ---
-  createDraftModel: () => Promise<ResultWithId>;
+  createDraftModel: (input: NewModelInput) => Promise<ResultWithId>;
+  /** Carrega um modelo pela API (link direto/refresh no construtor). */
+  loadModel: (modelId: string) => Promise<void>;
+  /** Estado da última carga por id (`loadModel`). */
+  modelLoad: { id: string | null; status: 'idle' | 'loading' | 'ready' | 'error' | 'not-found'; error: string | null };
+  /** Salva título/categoria/descrição do rascunho na API (RN-018: edição livre em rascunho). */
+  saveModelMeta: (
+    modelId: string,
+    patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>
+  ) => Promise<Result>;
   saveModel: (modelId: string) => Promise<Result>;
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
   addSection: (modelId: string) => void;
@@ -168,6 +185,36 @@ interface AppState {
 
 function newId(prefix: string) {
   return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Substitui (ou acrescenta) itens pelo id, mantendo a ordem dos que já existem. */
+function upsertById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const byId = new Map(incoming.map((item) => [item.id, item]));
+  const merged = current.map((item) => byId.get(item.id) ?? item);
+  const known = new Set(current.map((item) => item.id));
+  return [...merged, ...incoming.filter((item) => !known.has(item.id))];
+}
+
+/** Limites do modelo de inspeção na API (título 160, categoria 100, descrição 1000). */
+const MODEL_TITLE_MAX = 160;
+const MODEL_CATEGORY_MAX = 100;
+const MODEL_DESCRIPTION_MAX = 1000;
+
+/** Valida título/categoria/descrição do modelo; devolve a mensagem do 1º problema (ou null). */
+function validateModelMeta(
+  meta: { title?: string; category?: string; description?: string },
+  required: { requireTitle: boolean; requireCategory: boolean }
+): string | null {
+  if (required.requireTitle && !meta.title) return 'Informe o título do modelo.';
+  if (required.requireCategory && !meta.category) return 'Informe a categoria do modelo.';
+  if (meta.title && meta.title.length > MODEL_TITLE_MAX) return `O título deve ter no máximo ${MODEL_TITLE_MAX} caracteres.`;
+  if (meta.category && meta.category.length > MODEL_CATEGORY_MAX) {
+    return `A categoria deve ter no máximo ${MODEL_CATEGORY_MAX} caracteres.`;
+  }
+  if (meta.description && meta.description.length > MODEL_DESCRIPTION_MAX) {
+    return `A descrição deve ter no máximo ${MODEL_DESCRIPTION_MAX} caracteres.`;
+  }
+  return null;
 }
 
 /** Mínimo exigido pela API para a senha de um novo usuário. */
@@ -279,6 +326,7 @@ export const useAppStore = create<AppState>()(
     usersStatus: 'idle',
     usersError: null,
     models: MOCK_MODELS,
+    modelLoad: { id: null, status: 'idle', error: null },
     inspections: MOCK_INSPECTIONS,
     auditEvents: MOCK_AUDIT_EVENTS,
     accessRequests: MOCK_ACCESS_REQUESTS,
@@ -501,6 +549,10 @@ export const useAppStore = create<AppState>()(
       }
     },
 
+    mergeUsers: (items) => set((s) => ({ users: upsertById(s.users, items) })),
+    mergeClients: (items) => set((s) => ({ clients: upsertById(s.clients, items) })),
+    mergeLocations: (items) => set((s) => ({ locations: upsertById(s.locations, items) })),
+
     loadLocations: async () => {
       // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
       if (get().locationsStatus !== 'ready') set({ locationsStatus: 'loading', locationsError: null });
@@ -616,16 +668,82 @@ export const useAppStore = create<AppState>()(
       pushAudit('REJEITOU_ACESSO', 'Pedido de acesso', requestId);
     },
 
-    createDraftModel: async () => {
+    // RN-015: título e categoria obrigatórios. O título é único na API (409 se repetir).
+    createDraftModel: async (input) => {
+      const title = input.title.trim();
+      const category = input.category.trim();
+      const description = input.description?.trim() ?? '';
+      const invalid = validateModelMeta({ title, category, description }, { requireTitle: true, requireCategory: true });
+      if (invalid) return { ok: false, error: invalid };
       let draft: InspectionModel;
       try {
-        draft = await modelsApi.createModel({ title: 'Novo modelo de inspeção', description: '', category: 'Geral' });
+        draft = await modelsApi.createModel({ title, category, description: description || undefined });
       } catch (error) {
         return toErrorResult(error, 'Não foi possível criar o modelo. Tente novamente.');
       }
       set((s) => ({ models: [draft, ...s.models] }));
       pushAudit('CRIOU', 'Modelo de inspeção', draft.id, draft.title);
       return { ok: true, id: draft.id };
+    },
+
+    loadModel: async (modelId) => {
+      set({ modelLoad: { id: modelId, status: 'loading', error: null } });
+      let loaded: InspectionModel;
+      try {
+        loaded = await modelsApi.getModel(modelId);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          set({ modelLoad: { id: modelId, status: 'not-found', error: error.message } });
+          return;
+        }
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar o modelo. Tente novamente.');
+        set({ modelLoad: { id: modelId, status: 'error', error: message } });
+        return;
+      }
+      set((s) => {
+        const existing = s.models.find((m) => m.id === modelId);
+        // A API ainda não devolve seções: mantém as que já estão na tela.
+        const model = existing ? { ...loaded, sections: existing.sections } : loaded;
+        return {
+          models: existing ? s.models.map((m) => (m.id === modelId ? model : m)) : [model, ...s.models],
+          modelLoad: { id: modelId, status: 'ready', error: null },
+        };
+      });
+    },
+
+    saveModelMeta: async (modelId, patch) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (model.status !== 'RASCUNHO') return { ok: false, error: 'Só modelos em rascunho podem ser editados.' };
+      const clean = {
+        title: patch.title?.trim(),
+        category: patch.category?.trim(),
+        description: patch.description?.trim(),
+      };
+      const invalid = validateModelMeta(clean, {
+        requireTitle: patch.title !== undefined,
+        requireCategory: patch.category !== undefined,
+      });
+      if (invalid) return { ok: false, error: invalid };
+      // Modelo local (dados de exemplo), que não existe na API: edita só na tela.
+      if (model.lockVersion === undefined) {
+        get().updateModelMeta(modelId, clean);
+        return { ok: true };
+      }
+      let updated: InspectionModel;
+      try {
+        updated = await modelsApi.updateModelMeta(modelId, clean, model.lockVersion);
+      } catch (error) {
+        // Conflito de versão ou modelo que deixou de ser rascunho: recarrega o estado atual.
+        if (error instanceof ApiError && (error.code === 'VERSION_CONFLICT' || error.code === 'TEMPLATE_NOT_EDITABLE')) {
+          await get().loadModel(modelId);
+        }
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      // A API ainda não devolve seções: mantém as da tela.
+      set((s) => ({ models: s.models.map((m) => (m.id === modelId ? { ...updated, sections: m.sections } : m)) }));
+      pushAudit('ATUALIZOU', 'Modelo de inspeção', modelId, updated.title);
+      return { ok: true };
     },
 
     saveModel: async (modelId) => {

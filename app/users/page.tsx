@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
 import { StatCard, UserStatusBadge } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
+import { FilterSelect, Pagination, SearchBox, SortSelect, SortableTh, type SortOption } from '@/components/ListControls';
+import { usePagedList } from '@/hooks/usePagedList';
+import * as usersApi from '@/lib/users-api';
 import type { AccessRequest, User, UserRole, UserStatus } from '@/types';
 
 const ROLE_LABEL: Record<UserRole, string> = {
@@ -19,6 +22,28 @@ const USER_STATUS_LABEL: Record<UserStatus, string> = {
   INATIVO: 'inativo',
   BLOQUEADO: 'bloqueado',
 };
+
+const STATUS_FILTERS: { value: 'TODOS' | UserStatus; label: string }[] = [
+  { value: 'TODOS', label: 'Todos os status' },
+  { value: 'ATIVO', label: 'Ativos' },
+  { value: 'INATIVO', label: 'Inativos' },
+  { value: 'BLOQUEADO', label: 'Bloqueados' },
+];
+
+// Ordenações aceitas pela API em /users: name, email e createdAt.
+const SORT_OPTIONS: SortOption[] = [
+  { label: 'Nome (A–Z)', sort: { field: 'name', dir: 'asc' } },
+  { label: 'Nome (Z–A)', sort: { field: 'name', dir: 'desc' } },
+  { label: 'E-mail (A–Z)', sort: { field: 'email', dir: 'asc' } },
+  { label: 'Mais recentes', sort: { field: 'createdAt', dir: 'desc' } },
+];
+
+interface UserListFilters {
+  role: 'TODOS' | UserRole;
+  status: 'TODOS' | UserStatus;
+}
+
+const INITIAL_FILTERS: UserListFilters = { role: 'TODOS', status: 'TODOS' };
 
 const ROLE_FILTERS: { key: 'TODOS' | UserRole; label: string }[] = [
   { key: 'TODOS', label: 'Todos' },
@@ -36,8 +61,8 @@ const ROLE_FILTERS: { key: 'TODOS' | UserRole; label: string }[] = [
 export default function UsersPage() {
   const users = useAppStore((s) => s.users);
   const usersStatus = useAppStore((s) => s.usersStatus);
-  const usersError = useAppStore((s) => s.usersError);
   const loadUsers = useAppStore((s) => s.loadUsers);
+  const mergeUsers = useAppStore((s) => s.mergeUsers);
   const createUser = useAppStore((s) => s.createUser);
   const updateUser = useAppStore((s) => s.updateUser);
   const setUserStatus = useAppStore((s) => s.setUserStatus);
@@ -45,14 +70,26 @@ export default function UsersPage() {
   const approveAccessRequest = useAppStore((s) => s.approveAccessRequest);
   const rejectAccessRequest = useAppStore((s) => s.rejectAccessRequest);
 
-  const [roleFilter, setRoleFilter] = useState<(typeof ROLE_FILTERS)[number]['key']>('TODOS');
-  const [search, setSearch] = useState('');
   const [modalUser, setModalUser] = useState<User | 'new' | null>(null);
   const [approvingRequest, setApprovingRequest] = useState<AccessRequest | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // A lista vem da API (somente ADMIN) — recarrega a cada visita à tela.
+  // Busca, filtros, ordenação e paginação são feitos na API (PBI-0017.1).
+  // Cada página carregada leva os itens ao store, para editar usar o `version` atual.
+  const list = usePagedList<User, UserListFilters>(
+    ({ filters, ...query }) =>
+      usersApi.searchUsers({
+        ...query,
+        filters: {
+          role: filters.role === 'TODOS' ? undefined : filters.role,
+          status: filters.status === 'TODOS' ? undefined : filters.status,
+        },
+      }),
+    { sort: SORT_OPTIONS[0].sort, filters: INITIAL_FILTERS, onLoaded: mergeUsers }
+  );
+
+  // Os cartões de resumo usam o cadastro completo (todas as páginas).
   useEffect(() => {
     void loadUsers();
   }, [loadUsers]);
@@ -63,41 +100,47 @@ export default function UsersPage() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const ready = usersStatus === 'ready';
-
+  const summaryReady = usersStatus === 'ready';
   const pendingRequests = accessRequests.filter((r) => r.status === 'PENDENTE');
 
   async function handleStatusChange(id: string, status: UserStatus) {
     const result = await setUserStatus(id, status);
     setStatusError(result.ok ? null : result.error);
-    if (result.ok) setNotice(`Status alterado para ${USER_STATUS_LABEL[status]}.`);
+    if (result.ok) {
+      setNotice(`Status alterado para ${USER_STATUS_LABEL[status]}.`);
+      list.reload();
+    }
   }
 
   async function handleCreate(...args: Parameters<typeof createUser>) {
     const result = await createUser(...args);
-    if (result.ok) setNotice('Usuário criado.');
+    if (result.ok) {
+      setNotice('Usuário criado.');
+      list.reload();
+    }
     return result;
   }
 
   async function handleUpdate(...args: Parameters<typeof updateUser>) {
     const result = await updateUser(...args);
-    if (result.ok) setNotice('Alterações salvas.');
+    if (result.ok) {
+      setNotice('Alterações salvas.');
+      list.reload();
+    }
     return result;
   }
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return users
-      .filter((u) => roleFilter === 'TODOS' || u.role === roleFilter)
-      .filter((u) => !term || u.nome.toLowerCase().includes(term) || u.email.toLowerCase().includes(term));
-  }, [users, roleFilter, search]);
+  async function handleApprove(...args: Parameters<typeof approveAccessRequest>) {
+    const result = await approveAccessRequest(...args);
+    if (result.ok) list.reload();
+    return result;
+  }
 
-  const emptyProps =
-    users.length === 0
-      ? { title: 'Nenhum usuário cadastrado', description: 'Crie o primeiro usuário para começar.', action: { label: '+ Novo usuário', onClick: () => setModalUser('new') } }
-      : { title: 'Nenhum usuário encontrado', description: 'Ajuste os filtros ou a busca para ver outros resultados.' };
+  const emptyProps = list.hasActiveFilters
+    ? { title: 'Nenhum usuário encontrado', description: 'Nenhum resultado para a busca e os filtros atuais.', action: { label: 'Limpar filtros', onClick: list.clear } }
+    : { title: 'Nenhum usuário cadastrado', description: 'Crie o primeiro usuário para começar.', action: { label: '+ Novo usuário', onClick: () => setModalUser('new') } };
 
-  const activeCount = users.filter((u) => u.status === 'ATIVO').length;
+  const summary = (value: number) => (summaryReady ? value : '—');
 
   return (
     <div>
@@ -117,31 +160,12 @@ export default function UsersPage() {
         </div>
       )}
 
-      {usersStatus === 'error' && (
-        <div className="bg-white border border-slate-200 rounded-2xl mb-6">
-          <ErrorState
-            title="Não foi possível carregar os usuários"
-            message={usersError ?? 'Tente novamente.'}
-            onRetry={() => void loadUsers()}
-          />
-        </div>
-      )}
-
-      {(usersStatus === 'idle' || usersStatus === 'loading') && (
-        <div className="bg-white border border-slate-200 rounded-2xl mb-6">
-          <LoadingState label="Carregando usuários..." />
-        </div>
-      )}
-
-      {ready && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total de usuários" value={users.length} />
-        <StatCard label="Ativos" value={activeCount} tone="text-emerald-600" />
-        <StatCard label="Técnicos" value={users.filter((u) => u.role === 'TECHNICIAN').length} />
-        <StatCard label="Painel administrativo" value={users.filter((u) => u.role === 'ADMIN' || u.role === 'SUPERVISOR').length} tone="text-navy-700" />
-        </div>
-
-      )}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard label="Total de usuários" value={summary(users.length)} />
+        <StatCard label="Ativos" value={summary(users.filter((u) => u.status === 'ATIVO').length)} tone="text-emerald-600" />
+        <StatCard label="Técnicos" value={summary(users.filter((u) => u.role === 'TECHNICIAN').length)} />
+        <StatCard label="Painel administrativo" value={summary(users.filter((u) => u.role === 'ADMIN' || u.role === 'SUPERVISOR').length)} tone="text-navy-700" />
+      </div>
 
       {statusError && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-4">{statusError}</div>
@@ -176,83 +200,98 @@ export default function UsersPage() {
         </div>
       )}
 
-      {ready && (
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap">
+          {ROLE_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => list.setFilter('role', f.key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap ${
+                list.filters.role === f.key ? 'bg-navy-900 border-navy-900 text-white' : 'bg-white border-slate-300 text-slate-500'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <FilterSelect label="Filtrar por status" value={list.filters.status} options={STATUS_FILTERS} onChange={(v) => list.setFilter('status', v)} />
+        <div className="xl:hidden">
+          <SortSelect value={list.sort} options={SORT_OPTIONS} onChange={list.setSort} />
+        </div>
+        {list.hasActiveFilters && (
+          <button onClick={list.clear} className="text-xs font-semibold text-navy-700">Limpar filtros</button>
+        )}
+        <div className="ml-auto w-full sm:w-auto">
+          <SearchBox value={list.input} onChange={list.setInput} placeholder="Buscar por nome ou e-mail..." />
+        </div>
+      </div>
+
+      {list.status === 'loading' && (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <LoadingState label="Carregando usuários..." />
+        </div>
+      )}
+
+      {list.status === 'error' && (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <ErrorState title="Não foi possível carregar os usuários" message={list.error ?? 'Tente novamente.'} onRetry={list.reload} />
+        </div>
+      )}
+
+      {list.status === 'ready' && (
         <>
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <div className="flex gap-1.5 flex-wrap">
-            {ROLE_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setRoleFilter(f.key)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap ${
-                  roleFilter === f.key ? 'bg-navy-900 border-navy-900 text-white' : 'bg-white border-slate-300 text-slate-500'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome ou e-mail..."
-            className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-600 placeholder:text-slate-400 ml-auto w-full sm:w-64"
-          />
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          <table className="hidden xl:table w-full text-sm table-fixed">
-            <colgroup>
-              <col className="w-[26%]" />
-              <col className="w-[28%]" />
-              <col className="w-[18%]" />
-              <col className="w-[14%]" />
-              <col className="w-[14%]" />
-            </colgroup>
-            <thead>
-              <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-100">
-                <th className="px-5 py-3">Nome</th>
-                <th className="px-5 py-3">E-mail</th>
-                <th className="px-5 py-3">Perfil</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((u) => (
-                <tr key={u.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                  <td className="px-5 py-3 font-semibold text-navy-900 truncate">{u.nome}</td>
-                  <td className="px-5 py-3 text-slate-600 font-mono text-xs truncate">{u.email}</td>
-                  <td className="px-5 py-3 text-slate-600 truncate">{ROLE_LABEL[u.role]}</td>
-                  <td className="px-5 py-3"><UserStatusBadge status={u.status} /></td>
-                  <td className="px-5 py-3">
-                    <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
-                  </td>
+          <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden transition-opacity ${list.refreshing ? 'opacity-60' : ''}`} aria-busy={list.refreshing}>
+            <table className="hidden xl:table w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-[26%]" />
+                <col className="w-[28%]" />
+                <col className="w-[18%]" />
+                <col className="w-[14%]" />
+                <col className="w-[14%]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-100">
+                  <SortableTh label="Nome" field="name" sort={list.sort} onSort={list.sortBy} />
+                  <SortableTh label="E-mail" field="email" sort={list.sort} onSort={list.sortBy} />
+                  <th className="px-5 py-3">Perfil</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Ações</th>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={5}><EmptyState {...emptyProps} /></td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.items.map((u) => (
+                  <tr key={u.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-5 py-3 font-semibold text-navy-900 truncate">{u.nome}</td>
+                    <td className="px-5 py-3 text-slate-600 font-mono text-xs truncate">{u.email}</td>
+                    <td className="px-5 py-3 text-slate-600 truncate">{ROLE_LABEL[u.role]}</td>
+                    <td className="px-5 py-3"><UserStatusBadge status={u.status} /></td>
+                    <td className="px-5 py-3">
+                      <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
+                    </td>
+                  </tr>
+                ))}
+                {list.items.length === 0 && (
+                  <tr><td colSpan={5}><EmptyState {...emptyProps} /></td></tr>
+                )}
+              </tbody>
+            </table>
 
-          <div className="xl:hidden divide-y divide-slate-100">
-            {filtered.map((u) => (
-              <div key={u.id} className="p-4">
-                <div className="flex items-start justify-between gap-3 mb-1.5">
-                  <span className="font-semibold text-navy-900 truncate min-w-0">{u.nome}</span>
-                  <UserStatusBadge status={u.status} />
+            <div className="xl:hidden divide-y divide-slate-100">
+              {list.items.map((u) => (
+                <div key={u.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3 mb-1.5">
+                    <span className="font-semibold text-navy-900 truncate min-w-0">{u.nome}</span>
+                    <UserStatusBadge status={u.status} />
+                  </div>
+                  <div className="text-xs font-mono text-slate-500 mb-1">{u.email}</div>
+                  <div className="text-xs text-slate-500 mb-3">{ROLE_LABEL[u.role]}</div>
+                  <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
                 </div>
-                <div className="text-xs font-mono text-slate-500 mb-1">{u.email}</div>
-                <div className="text-xs text-slate-500 mb-3">{ROLE_LABEL[u.role]}</div>
-                <UserRowActions user={u} onEdit={() => setModalUser(u)} onStatus={(s) => handleStatusChange(u.id, s)} />
-              </div>
-            ))}
-            {filtered.length === 0 && (
-              <EmptyState {...emptyProps} />
-            )}
+              ))}
+              {list.items.length === 0 && <EmptyState {...emptyProps} />}
+            </div>
           </div>
-        </div>
+          <Pagination meta={list.meta} onPage={list.setPage} onSize={list.setSize} />
         </>
       )}
 
@@ -269,7 +308,7 @@ export default function UsersPage() {
         <ApproveRequestModal
           request={approvingRequest}
           onClose={() => setApprovingRequest(null)}
-          onApprove={approveAccessRequest}
+          onApprove={handleApprove}
         />
       )}
     </div>
