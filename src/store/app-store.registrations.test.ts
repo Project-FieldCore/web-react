@@ -32,6 +32,10 @@ function mocked<T extends (...args: never[]) => unknown>(fn: T) {
 
 const EXISTING_CLIENT_ID = 'cli-1';
 
+const initialUsersForMerge = useAppStore.getState().users;
+const initialClientsForMerge = useAppStore.getState().clients;
+const initialLocationsForMerge = useAppStore.getState().locations;
+
 describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -536,6 +540,54 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       expect(result).toEqual({ ok: true });
       expect(useAppStore.getState().accessRequests.find((r) => r.id === request.id)?.status).toBe('APROVADA');
       expect(useAppStore.getState().users).toContainEqual(created);
+    });
+  });
+
+  describe('merge das páginas carregadas (PBI-0017.1)', () => {
+    afterEach(() => {
+      useAppStore.setState({ users: initialUsersForMerge, clients: initialClientsForMerge, locations: initialLocationsForMerge });
+    });
+
+    it('mergeUsers atualiza o version dos já conhecidos e acrescenta os novos, sem perder os demais', () => {
+      useAppStore.setState({
+        users: [
+          { id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 1 },
+          { id: 'u2', nome: 'Bia', email: 'bia@x.com', role: 'SUPERVISOR', status: 'ATIVO', version: 1 },
+        ],
+      });
+
+      useAppStore.getState().mergeUsers([
+        { id: 'u2', nome: 'Bia Souza', email: 'bia@x.com', role: 'SUPERVISOR', status: 'ATIVO', version: 4 },
+        { id: 'u3', nome: 'Caio', email: 'caio@x.com', role: 'TECHNICIAN', status: 'ATIVO', version: 0 },
+      ]);
+
+      const users = useAppStore.getState().users;
+      expect(users.map((u) => u.id)).toEqual(['u1', 'u2', 'u3']);
+      expect(users.find((u) => u.id === 'u2')).toMatchObject({ nome: 'Bia Souza', version: 4 });
+      expect(users.find((u) => u.id === 'u1')?.version).toBe(1);
+    });
+
+    it('mergeClients e mergeLocations seguem a mesma regra', () => {
+      useAppStore.setState({
+        clients: [{ id: 'c1', nome: 'Acme', ativo: true, version: 0 }],
+        locations: [{ id: 'l1', clienteId: 'c1', nome: 'Matriz', ativo: true, version: 0 }],
+      });
+
+      useAppStore.getState().mergeClients([{ id: 'c1', nome: 'Acme Ltda', ativo: false, version: 2 }]);
+      useAppStore.getState().mergeLocations([{ id: 'l2', clienteId: 'c1', nome: 'Filial', ativo: true, version: 0 }]);
+
+      expect(useAppStore.getState().clients).toEqual([{ id: 'c1', nome: 'Acme Ltda', ativo: false, version: 2 }]);
+      expect(useAppStore.getState().locations.map((l) => l.id)).toEqual(['l1', 'l2']);
+    });
+
+    it('depois do merge, editar usa o version da página carregada', async () => {
+      useAppStore.setState({ users: [{ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 1 }] });
+      useAppStore.getState().mergeUsers([{ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 7 }]);
+      mocked(usersApi.setUserStatus).mockResolvedValue({ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'INATIVO', version: 8 });
+
+      await useAppStore.getState().setUserStatus('u1', 'INATIVO');
+
+      expect(usersApi.setUserStatus).toHaveBeenCalledWith('u1', 'INATIVO', 7);
     });
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createClient, listClients, setClientActive, updateClient } from './clients-api';
+import { createClient, listClients, searchClients, setClientActive, updateClient } from './clients-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -68,6 +68,49 @@ describe('clients-api', () => {
       .mockResolvedValue(jsonResponse(200, { items: [], page: { page: 0, size: 100, totalElements: 0, totalPages: 0 } }));
 
     expect(await listClients()).toEqual([]);
+  });
+
+  it('searchClients envia page/size/sort/q e o filtro de status na query', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { items: [API_CLIENT], page: { page: 2, size: 12, totalElements: 30, totalPages: 3 } })
+    );
+    global.fetch = fetchMock;
+
+    const result = await searchClients({
+      page: 2,
+      size: 12,
+      sort: { field: 'createdAt', dir: 'desc' },
+      q: 'acme',
+      filters: { ativo: false },
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.pathname).toMatch(/\/clients$/);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: '2',
+      size: '12',
+      sort: 'createdAt,desc',
+      q: 'acme',
+      status: 'INACTIVE',
+    });
+    expect(result.items).toEqual([APP_CLIENT]);
+    expect(result.page.totalElements).toBe(30);
+  });
+
+  it('searchClients: ativo=true vira ACTIVE e sem filtro não envia status', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () =>
+        jsonResponse(200, { items: [], page: { page: 0, size: 12, totalElements: 0, totalPages: 0 } })
+      );
+    global.fetch = fetchMock;
+    const base = { page: 0, size: 12, sort: { field: 'name', dir: 'asc' as const }, q: '' };
+
+    await searchClients({ ...base, filters: { ativo: true } });
+    await searchClients({ ...base, filters: {} });
+
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('status')).toBe('ACTIVE');
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.has('status')).toBe(false);
   });
 
   it('createClient envia name/document (contrato da API) e devolve o cliente convertido', async () => {

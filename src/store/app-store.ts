@@ -78,6 +78,13 @@ interface AppState {
   usersStatus: 'idle' | 'loading' | 'ready' | 'error';
   usersError: string | null;
   loadUsers: () => Promise<void>;
+  /**
+   * As listagens paginadas buscam só uma página; estas ações levam os itens
+   * dela para o store (por id), para editar/mudar status usar o `version` mais recente.
+   */
+  mergeUsers: (items: User[]) => void;
+  mergeClients: (items: Client[]) => void;
+  mergeLocations: (items: Location[]) => void;
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
@@ -168,6 +175,14 @@ interface AppState {
 
 function newId(prefix: string) {
   return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Substitui (ou acrescenta) itens pelo id, mantendo a ordem dos que já existem. */
+function upsertById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const byId = new Map(incoming.map((item) => [item.id, item]));
+  const merged = current.map((item) => byId.get(item.id) ?? item);
+  const known = new Set(current.map((item) => item.id));
+  return [...merged, ...incoming.filter((item) => !known.has(item.id))];
 }
 
 /** Mínimo exigido pela API para a senha de um novo usuário. */
@@ -500,6 +515,10 @@ export const useAppStore = create<AppState>()(
         set({ clientsStatus: 'error', clientsError: message });
       }
     },
+
+    mergeUsers: (items) => set((s) => ({ users: upsertById(s.users, items) })),
+    mergeClients: (items) => set((s) => ({ clients: upsertById(s.clients, items) })),
+    mergeLocations: (items) => set((s) => ({ locations: upsertById(s.locations, items) })),
 
     loadLocations: async () => {
       // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.

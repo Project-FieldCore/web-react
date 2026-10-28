@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createUser, listUsers, setUserStatus, updateUser } from './users-api';
+import { createUser, listUsers, searchUsers, setUserStatus, updateUser } from './users-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -79,6 +79,63 @@ describe('users-api', () => {
       .mockResolvedValue(jsonResponse(200, { items: [], page: { page: 0, size: 100, totalElements: 0, totalPages: 0 } }));
 
     expect(await listUsers()).toEqual([]);
+  });
+
+  it('searchUsers envia page/size/sort/q e os filtros (status e role) na query', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { items: [API_USER], page: { page: 1, size: 10, totalElements: 11, totalPages: 2 } })
+    );
+    global.fetch = fetchMock;
+
+    const result = await searchUsers({
+      page: 1,
+      size: 10,
+      sort: { field: 'email', dir: 'desc' },
+      q: ' ana ',
+      filters: { status: 'INATIVO', role: 'SUPERVISOR' },
+    });
+
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.pathname).toMatch(/\/users$/);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: '1',
+      size: '10',
+      sort: 'email,desc',
+      q: 'ana',
+      status: 'INACTIVE',
+      role: 'SUPERVISOR',
+    });
+    expect(result.items).toEqual([APP_USER]);
+    expect(result.page).toEqual({ page: 1, size: 10, totalElements: 11, totalPages: 2 });
+  });
+
+  it('searchUsers omite q e filtros quando não há busca nem filtro', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { items: [], page: { page: 0, size: 20, totalElements: 0, totalPages: 0 } })
+    );
+    global.fetch = fetchMock;
+
+    await searchUsers({ page: 0, size: 20, sort: { field: 'name', dir: 'asc' }, q: '', filters: {} });
+
+    expect(Object.fromEntries(new URL(fetchMock.mock.calls[0][0]).searchParams)).toEqual({
+      page: '0',
+      size: '20',
+      sort: 'name,asc',
+    });
+  });
+
+  it('ordenação inválida (400 INVALID_SORT) chega como ApiError em português', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(400, { status: 400, code: 'INVALID_SORT', message: 'Sort must use an allowed field' }));
+
+    await expect(
+      searchUsers({ page: 0, size: 20, sort: { field: 'phone', dir: 'asc' }, q: '', filters: {} })
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_SORT',
+      message: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
+    });
   });
 
   it('createUser envia name/password (contrato da API) e devolve o usuário convertido', async () => {

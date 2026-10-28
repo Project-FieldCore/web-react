@@ -1,9 +1,11 @@
 import { http } from './http';
+import { buildQueryString, fetchAllPages, listParams, type ListQuery, type Paged } from './paged-list';
 import type { User, UserRole, UserStatus } from '@/types';
 
 /**
  * Contrato real da API (openapi/fieldops-v1.yaml + UserController, somente ADMIN):
- *   GET   /users?page&size            -> { items: User[], page: { page, size, totalElements, totalPages } }
+ *   GET   /users?page&size&sort&q&status&role -> { items: User[], page: { page, size, totalElements, totalPages } }
+ *         sort: name | email | createdAt ("campo,asc|desc"); q busca nome e e-mail
  *   POST  /users                      -> 201 User            (409 EMAIL_ALREADY_EXISTS)
  *   PATCH /users/{id}                 -> User  { name, email, role, phone, version }   (409 VERSION_CONFLICT)
  *   PATCH /users/{id}/status          -> User  { status, version }
@@ -51,20 +53,30 @@ function toUser(user: ApiUser): User {
   };
 }
 
-const PAGE_SIZE = 100; // máximo aceito pela API
+/** Filtros explícitos da listagem de usuários (undefined = sem filtro). */
+export interface UserFilters {
+  status?: UserStatus;
+  role?: UserRole;
+}
 
-/** Busca todas as páginas — o cadastro é pequeno e a tela filtra/busca localmente. */
+/** Uma página da listagem, com busca, filtros e ordenação feitos na API. */
+export async function searchUsers(query: ListQuery<UserFilters>): Promise<Paged<User>> {
+  const response = await http.get<ApiUserPage>(
+    `/users${buildQueryString({
+      ...listParams(query),
+      status: query.filters.status ? STATUS_TO_API[query.filters.status] : undefined,
+      role: query.filters.role,
+    })}`
+  );
+  return { items: response.items.map(toUser), page: response.page };
+}
+
+/** Todos os usuários (todas as páginas) — para contagens e para manter o `version` no store. */
 export async function listUsers(): Promise<User[]> {
-  const users: User[] = [];
-  let page = 0;
-  let totalPages = 1;
-  while (page < totalPages) {
-    const response = await http.get<ApiUserPage>(`/users?page=${page}&size=${PAGE_SIZE}`);
-    users.push(...response.items.map(toUser));
-    totalPages = response.page.totalPages;
-    page += 1;
-  }
-  return users;
+  return fetchAllPages(async (page, size) => {
+    const response = await http.get<ApiUserPage>(`/users${buildQueryString({ page, size })}`);
+    return { items: response.items.map(toUser), page: response.page };
+  });
 }
 
 export async function createUser(nome: string, email: string, role: UserRole, senha: string): Promise<User> {
