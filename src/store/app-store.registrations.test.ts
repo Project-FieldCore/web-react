@@ -10,6 +10,7 @@ vi.mock('@/lib/clients-api', () => ({
   setClientActive: vi.fn(),
 }));
 vi.mock('@/lib/locations-api', () => ({
+  listLocations: vi.fn(),
   createLocation: vi.fn(),
   updateLocation: vi.fn(),
   setLocationActive: vi.fn(),
@@ -207,6 +208,12 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
   });
 
   describe('locations', () => {
+    // Os testes de carga/edição trocam a lista de locais — restaura para os demais.
+    const initialLocations = useAppStore.getState().locations;
+    afterEach(() => {
+      useAppStore.setState({ locations: initialLocations, locationsStatus: 'idle', locationsError: null });
+    });
+
     it('createLocation não chama a API quando o cliente não existe (RN-009)', async () => {
       const result = await useAppStore.getState().createLocation('cli-inexistente', 'Depósito');
 
@@ -214,22 +221,151 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       expect(locationsApi.createLocation).not.toHaveBeenCalled();
     });
 
-    it('createLocation chama a API (contra /sites) e guarda a entidade retornada', async () => {
-      const location: Location = { id: 'loc-9', clienteId: EXISTING_CLIENT_ID, nome: 'Depósito', ativo: true };
+    it('createLocation não chama a API com nome vazio', async () => {
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, '  ');
+
+      expect(result).toEqual({ ok: false, error: 'Informe o nome do local.' });
+      expect(locationsApi.createLocation).not.toHaveBeenCalled();
+    });
+
+    it('createLocation chama a API (sob o cliente) e guarda a entidade retornada', async () => {
+      const location: Location = { id: 'loc-9', clienteId: EXISTING_CLIENT_ID, nome: 'Depósito', ativo: true, version: 0 };
       mocked(locationsApi.createLocation).mockResolvedValue(location);
 
-      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito');
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito', 'Rua A, 10');
 
       expect(result).toEqual({ ok: true, id: 'loc-9' });
+      expect(locationsApi.createLocation).toHaveBeenCalledWith(EXISTING_CLIENT_ID, 'Depósito', 'Rua A, 10');
       expect(useAppStore.getState().locations).toContainEqual(location);
     });
 
-    it('updateLocation propaga erro de rede', async () => {
-      mocked(locationsApi.updateLocation).mockRejectedValue(new NetworkError('Sem conexão.'));
+    it('createLocation propaga nome duplicado no cliente (409) da API', async () => {
+      mocked(locationsApi.createLocation).mockRejectedValue(
+        new ApiError('Já existe um local com esse nome para este cliente.', 409, undefined, 'SITE_NAME_ALREADY_EXISTS')
+      );
 
-      const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Novo nome' });
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito');
 
-      expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
+      expect(result).toEqual({ ok: false, error: 'Já existe um local com esse nome para este cliente.' });
+    });
+
+    describe('com locais carregados da API (com version)', () => {
+      const loaded: Location = { id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', endereco: 'Rua A', ativo: true, version: 3 };
+
+      beforeEach(() => {
+        useAppStore.setState({ locations: [loaded], locationsStatus: 'ready', locationsError: null });
+      });
+
+      it('updateLocation envia o version e atualiza a lista', async () => {
+        const updated: Location = { ...loaded, nome: 'Matriz SP', version: 4 };
+        mocked(locationsApi.updateLocation).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Matriz SP' });
+
+        expect(result).toEqual({ ok: true });
+        expect(locationsApi.updateLocation).toHaveBeenCalledWith('loc-1', { nome: 'Matriz SP', endereco: undefined }, 3);
+        expect(useAppStore.getState().locations).toEqual([updated]);
+      });
+
+      it('updateLocation não chama a API com nome vazio', async () => {
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: ' ' });
+
+        expect(result).toEqual({ ok: false, error: 'Informe o nome do local.' });
+        expect(locationsApi.updateLocation).not.toHaveBeenCalled();
+      });
+
+      it('updateLocation propaga erro de rede e não altera a lista', async () => {
+        mocked(locationsApi.updateLocation).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Novo nome' });
+
+        expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
+        expect(useAppStore.getState().locations).toEqual([loaded]);
+      });
+
+      it('setLocationActive envia o version e guarda o local retornado (com o version novo)', async () => {
+        const updated: Location = { ...loaded, ativo: false, version: 4 };
+        mocked(locationsApi.setLocationActive).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+
+        expect(result).toEqual({ ok: true });
+        expect(locationsApi.setLocationActive).toHaveBeenCalledWith('loc-1', false, 3);
+        expect(useAppStore.getState().locations).toEqual([updated]);
+      });
+
+      it('VERSION_CONFLICT recarrega a lista (sem piscar loading) e devolve a mensagem', async () => {
+        const fresh: Location = { ...loaded, nome: 'Matriz (outra pessoa editou)', version: 5 };
+        mocked(locationsApi.setLocationActive).mockRejectedValue(
+          new ApiError('Este registro foi alterado por outra pessoa.', 409, undefined, 'VERSION_CONFLICT')
+        );
+        mocked(locationsApi.listLocations).mockResolvedValue([fresh]);
+        const statuses: string[] = [];
+        const unsubscribe = useAppStore.subscribe((st) => statuses.push(st.locationsStatus));
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+        unsubscribe();
+
+        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(useAppStore.getState().locations).toEqual([fresh]);
+        expect(statuses).not.toContain('loading');
+      });
+
+      it('sem version conhecido, não chama a API e pede para recarregar', async () => {
+        useAppStore.setState({ locations: [{ ...loaded, version: undefined }] });
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+
+        expect(result).toEqual({ ok: false, error: 'Recarregue a lista de locais e tente de novo.' });
+        expect(locationsApi.setLocationActive).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('loadLocations', () => {
+      it('carrega a lista da API e marca como pronta', async () => {
+        const list: Location[] = [{ id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', ativo: true, version: 0 }];
+        mocked(locationsApi.listLocations).mockResolvedValue(list);
+        useAppStore.setState({ locationsStatus: 'idle' });
+
+        const promise = useAppStore.getState().loadLocations();
+        expect(useAppStore.getState().locationsStatus).toBe('loading');
+        await promise;
+
+        expect(useAppStore.getState().locations).toEqual(list);
+        expect(useAppStore.getState().locationsStatus).toBe('ready');
+        expect(useAppStore.getState().locationsError).toBeNull();
+      });
+
+      it('lista vazia é um resultado válido (estado vazio, não erro)', async () => {
+        mocked(locationsApi.listLocations).mockResolvedValue([]);
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locations).toEqual([]);
+        expect(useAppStore.getState().locationsStatus).toBe('ready');
+      });
+
+      it('falha da API vira estado de erro com a mensagem, sem trocar a lista', async () => {
+        const before = useAppStore.getState().locations;
+        useAppStore.setState({ locationsStatus: 'idle' });
+        mocked(locationsApi.listLocations).mockRejectedValue(new ApiError('Você não tem permissão para realizar esta ação.', 403));
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locationsStatus).toBe('error');
+        expect(useAppStore.getState().locationsError).toBe('Você não tem permissão para realizar esta ação.');
+        expect(useAppStore.getState().locations).toBe(before);
+      });
+
+      it('erro de rede vira estado de erro', async () => {
+        useAppStore.setState({ locationsStatus: 'idle' });
+        mocked(locationsApi.listLocations).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locationsStatus).toBe('error');
+        expect(useAppStore.getState().locationsError).toBe('Sem conexão.');
+      });
     });
   });
 

@@ -22,6 +22,8 @@ export default function SchedulePage() {
   const clientsStatus = useAppStore((s) => s.clientsStatus);
   const loadClients = useAppStore((s) => s.loadClients);
   const locations = useAppStore((s) => s.locations);
+  const locationsStatus = useAppStore((s) => s.locationsStatus);
+  const loadLocations = useAppStore((s) => s.loadLocations);
   const equipment = useAppStore((s) => s.equipment);
   const technicians = useAppStore((s) => s.users.filter((u) => u.role === 'TECHNICIAN'));
   const scheduleInspection = useAppStore((s) => s.scheduleInspection);
@@ -40,11 +42,17 @@ export default function SchedulePage() {
   // Clientes vêm da API; cliente inativo fica fora de novos agendamentos.
   useEffect(() => {
     void loadClients();
-  }, [loadClients]);
+    void loadLocations();
+  }, [loadClients, loadLocations]);
   const activeClients = useMemo(() => clients.filter((c) => c.ativo), [clients]);
   const clientsLoading = clientsStatus === 'idle' || clientsStatus === 'loading';
 
-  const availableLocations = useMemo(() => locations.filter((l) => l.clienteId === clienteId), [locations, clienteId]);
+  // Local inativo (inativação lógica) fica fora de novos agendamentos.
+  const availableLocations = useMemo(
+    () => locations.filter((l) => l.clienteId === clienteId && l.ativo),
+    [locations, clienteId]
+  );
+  const locationsLoading = locationsStatus === 'idle' || locationsStatus === 'loading';
   const availableEquipment = useMemo(() => equipment.filter((e) => e.localId === localId), [equipment, localId]);
 
   const selectedModel = models.find((m) => m.id === modeloId);
@@ -127,12 +135,22 @@ export default function SchedulePage() {
                 <select
                   value={localId}
                   onChange={(e) => { setLocalId(e.target.value); setEquipamentoId(''); }}
-                  disabled={!clienteId}
+                  disabled={!clienteId || locationsLoading}
                   className="input disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">{clienteId ? 'Selecione...' : 'Selecione um cliente primeiro'}</option>
+                  <option value="">
+                    {!clienteId ? 'Selecione um cliente primeiro' : locationsLoading ? 'Carregando locais...' : 'Selecione...'}
+                  </option>
                   {availableLocations.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
                 </select>
+                {locationsStatus === 'error' && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                    Não foi possível carregar os locais.{' '}
+                    <button type="button" onClick={() => void loadLocations()} className="underline">
+                      Tentar novamente
+                    </button>
+                  </p>
+                )}
               </Field>
             </div>
             <Field label="Equipamento (opcional para inspeções de local/ambiente — RN-026)">

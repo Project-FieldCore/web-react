@@ -95,6 +95,8 @@ export interface Location {
   ativo: boolean;
   lat?: number;
   lng?: number;
+  /** Versão da API (trava otimista): obrigatória para editar e mudar status. */
+  version?: number;
 }
 
 export interface Equipment {

@@ -17,6 +17,8 @@ export default function ClientsPage() {
   const clientsError = useAppStore((s) => s.clientsError);
   const loadClients = useAppStore((s) => s.loadClients);
   const locations = useAppStore((s) => s.locations);
+  const locationsStatus = useAppStore((s) => s.locationsStatus);
+  const loadLocations = useAppStore((s) => s.loadLocations);
   const createClient = useAppStore((s) => s.createClient);
   const setClientActive = useAppStore((s) => s.setClientActive);
 
@@ -29,7 +31,11 @@ export default function ClientsPage() {
   // A lista vem da API — recarrega a cada visita à tela.
   useEffect(() => {
     void loadClients();
-  }, [loadClients]);
+    void loadLocations();
+  }, [loadClients, loadLocations]);
+
+  // Até os locais chegarem da API, não mostra a contagem de exemplo.
+  const locationsReady = locationsStatus === 'ready';
 
   useEffect(() => {
     if (!notice) return;
@@ -104,7 +110,7 @@ export default function ClientsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCard label="Clientes cadastrados" value={clients.length} />
           <StatCard label="Ativos" value={clients.filter((c) => c.ativo).length} tone="text-emerald-600" />
-          <StatCard label="Locais no total" value={locations.length} tone="text-navy-700" />
+          <StatCard label="Locais no total" value={locationsReady ? locations.length : '—'} tone="text-navy-700" />
         </div>
 
         <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -145,7 +151,7 @@ export default function ClientsPage() {
                 {c.cnpj && <p className="text-xs text-slate-400 font-mono mb-3">{c.cnpj}</p>}
                 <div className="mt-auto flex items-center justify-between pt-3 border-t border-slate-100">
                   <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
-                    {locationCount(c.id)} {locationCount(c.id) === 1 ? 'local' : 'locais'}
+                    {locationsReady ? `${locationCount(c.id)} ${locationCount(c.id) === 1 ? 'local' : 'locais'}` : 'Locais…'}
                   </span>
                   <button
                     onClick={() => handleToggleActive(c.id, !c.ativo)}

@@ -21,7 +21,10 @@ export default function ClientDetailPage() {
   const clientsStatus = useAppStore((s) => s.clientsStatus);
   const clientsError = useAppStore((s) => s.clientsError);
   const loadClients = useAppStore((s) => s.loadClients);
-  const locations = useAppStore((s) => s.locations.filter((l) => l.clienteId === clientId));
+  const allLocations = useAppStore((s) => s.locations);
+  const locationsStatus = useAppStore((s) => s.locationsStatus);
+  const locationsLoadError = useAppStore((s) => s.locationsError);
+  const loadLocations = useAppStore((s) => s.loadLocations);
   const equipment = useAppStore((s) => s.equipment);
   const updateClient = useAppStore((s) => s.updateClient);
   const setClientActive = useAppStore((s) => s.setClientActive);
@@ -37,7 +40,10 @@ export default function ClientDetailPage() {
   // O cliente vem da API — carrega ao abrir (inclusive em link direto ou refresh).
   useEffect(() => {
     void loadClients();
-  }, [loadClients]);
+    void loadLocations();
+  }, [loadClients, loadLocations]);
+
+  const locations = allLocations.filter((l) => l.clienteId === clientId);
 
   // Sincroniza os campos quando o cliente chega (ou muda) da API.
   useEffect(() => {
@@ -96,6 +102,13 @@ export default function ClientDetailPage() {
   async function handleToggleLocationActive(id: string, ativo: boolean) {
     const result = await setLocationActive(id, ativo);
     setLocationsError(result.ok ? null : result.error);
+    if (result.ok) setNotice(ativo ? 'Local ativado.' : 'Local inativado.');
+  }
+
+  async function handleCreateLocation(...args: Parameters<typeof createLocation>) {
+    const result = await createLocation(...args);
+    if (result.ok) setNotice('Local criado.');
+    return result;
   }
 
   const equipmentCount = (localId: string) => equipment.filter((e) => e.localId === localId).length;
@@ -147,7 +160,19 @@ export default function ClientDetailPage() {
         <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{locationsError}</div>
       )}
 
-      {locations.length === 0 ? (
+      {(locationsStatus === 'idle' || locationsStatus === 'loading') ? (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <LoadingState label="Carregando locais..." />
+        </div>
+      ) : locationsStatus === 'error' ? (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <ErrorState
+            title="Não foi possível carregar os locais"
+            message={locationsLoadError ?? 'Tente novamente.'}
+            onRetry={() => void loadLocations()}
+          />
+        </div>
+      ) : locations.length === 0 ? (
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-400">
           Nenhum local cadastrado para este cliente ainda.
         </div>
@@ -179,7 +204,7 @@ export default function ClientDetailPage() {
       )}
 
       {showNewLocation && (
-        <NewLocationModal clienteId={client.id} onClose={() => setShowNewLocation(false)} onCreate={createLocation} />
+        <NewLocationModal clienteId={client.id} onClose={() => setShowNewLocation(false)} onCreate={handleCreateLocation} />
       )}
     </div>
   );
