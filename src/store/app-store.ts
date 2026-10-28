@@ -68,6 +68,10 @@ interface AppState {
   clientsError: string | null;
   loadClients: () => Promise<void>;
   locations: Location[];
+  /** Carga da lista de locais pela API (telas de clientes, local e agenda). */
+  locationsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  locationsError: string | null;
+  loadLocations: () => Promise<void>;
   equipment: Equipment[];
   users: User[];
   /** Carga da lista de usuários pela API (tela /users). */
@@ -228,6 +232,13 @@ export const useAppStore = create<AppState>()(
     }
   }
 
+  // Mesma ideia para locais (409 VERSION_CONFLICT).
+  async function reloadLocationsOnVersionConflict(error: unknown) {
+    if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+      await get().loadLocations();
+    }
+  }
+
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
   // Integrado à API (#133) — ver src/lib/users-api.ts para o contrato assumido.
@@ -261,6 +272,8 @@ export const useAppStore = create<AppState>()(
     clientsStatus: 'idle',
     clientsError: null,
     locations: MOCK_LOCATIONS,
+    locationsStatus: 'idle',
+    locationsError: null,
     equipment: MOCK_EQUIPMENT,
     users: MOCK_USERS,
     usersStatus: 'idle',
@@ -393,8 +406,7 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
-    // Integrado à API (#133) — ver src/lib/locations-api.ts (nome assumido
-    // como "site" no backend; ajustar se divergir do contrato real).
+    // Local = "site" na API; sempre criado sob um cliente (RN-009).
     createLocation: async (clienteId, nome, endereco) => {
       const client = get().clients.find((c) => c.id === clienteId);
       if (!client) return { ok: false, error: 'Cliente não encontrado (RN-009).' };
@@ -411,10 +423,17 @@ export const useAppStore = create<AppState>()(
     },
     updateLocation: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do local.' };
+      const version = get().locations.find((l) => l.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de locais e tente de novo.' };
       let location: Location;
       try {
-        location = await locationsApi.updateLocation(id, patch);
+        location = await locationsApi.updateLocation(
+          id,
+          { nome: patch.nome?.trim(), endereco: patch.endereco?.trim() },
+          version
+        );
       } catch (error) {
+        await reloadLocationsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
       }
       set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
@@ -422,10 +441,13 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
     setLocationActive: async (id, ativo) => {
+      const version = get().locations.find((l) => l.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de locais e tente de novo.' };
       let location: Location;
       try {
-        location = await locationsApi.setLocationActive(id, ativo);
+        location = await locationsApi.setLocationActive(id, ativo, version);
       } catch (error) {
+        await reloadLocationsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível alterar o status do local. Tente novamente.');
       }
       set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
@@ -465,8 +487,6 @@ export const useAppStore = create<AppState>()(
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Equipamento', id);
     },
 
-    // Substitui a lista pelo cadastro real da API (somente ADMIN). Até a carga
-    // terminar, a tela /users mostra loading — nunca os dados de exemplo.
     // Substitui a lista pelo cadastro real da API. Até a carga terminar a tela
     // mostra loading — nunca os dados de exemplo.
     loadClients: async () => {
@@ -481,6 +501,20 @@ export const useAppStore = create<AppState>()(
       }
     },
 
+    loadLocations: async () => {
+      // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
+      if (get().locationsStatus !== 'ready') set({ locationsStatus: 'loading', locationsError: null });
+      try {
+        const locations = await locationsApi.listLocations();
+        set({ locations, locationsStatus: 'ready', locationsError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os locais. Tente novamente.');
+        set({ locationsStatus: 'error', locationsError: message });
+      }
+    },
+
+    // Substitui a lista pelo cadastro real da API (somente ADMIN). Até a carga
+    // terminar, a tela /users mostra loading — nunca os dados de exemplo.
     loadUsers: async () => {
       // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
       if (get().usersStatus !== 'ready') set({ usersStatus: 'loading', usersError: null });
@@ -732,6 +766,10 @@ export const useAppStore = create<AppState>()(
       const client = get().clients.find((c) => c.id === input.clienteId);
       if (client && !client.ativo) {
         return { ok: false, error: 'Cliente inativo não pode receber novos agendamentos.' };
+      }
+      const location = get().locations.find((l) => l.id === input.localId);
+      if (location && !location.ativo) {
+        return { ok: false, error: 'Local inativo não pode receber novos agendamentos.' };
       }
 
       let inspection: Inspection;

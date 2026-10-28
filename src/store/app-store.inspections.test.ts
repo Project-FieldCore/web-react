@@ -100,6 +100,19 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       }
     });
 
+    it('local inativo fica fora de novos agendamentos e não chama a API', async () => {
+      const initialLocations = useAppStore.getState().locations;
+      useAppStore.setState({ locations: [{ id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', ativo: false, version: 1 }] });
+      try {
+        const result = await useAppStore.getState().scheduleInspection(input);
+
+        expect(result).toEqual({ ok: false, error: 'Local inativo não pode receber novos agendamentos.' });
+        expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+      } finally {
+        useAppStore.setState({ locations: initialLocations });
+      }
+    });
+
     it('RN-025: data prevista obrigatória', async () => {
       const result = await useAppStore.getState().scheduleInspection({ ...input, dataPrevista: '' });
 
