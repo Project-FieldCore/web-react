@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ActiveBadge } from '@/components/Badges';
+import { ErrorState, LoadingState } from '@/components/States';
 import { Field, Modal } from '@/components/Modal';
 
 /**
@@ -17,6 +18,9 @@ export default function ClientDetailPage() {
   const router = useRouter();
 
   const client = useAppStore((s) => s.clients.find((c) => c.id === clientId));
+  const clientsStatus = useAppStore((s) => s.clientsStatus);
+  const clientsError = useAppStore((s) => s.clientsError);
+  const loadClients = useAppStore((s) => s.loadClients);
   const locations = useAppStore((s) => s.locations.filter((l) => l.clienteId === clientId));
   const equipment = useAppStore((s) => s.equipment);
   const updateClient = useAppStore((s) => s.updateClient);
@@ -26,21 +30,67 @@ export default function ClientDetailPage() {
 
   const [showNewLocation, setShowNewLocation] = useState(false);
   const [nome, setNome] = useState(client?.nome ?? '');
+  const [cnpj, setCnpj] = useState(client?.cnpj ?? '');
   const [editError, setEditError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // O cliente vem da API — carrega ao abrir (inclusive em link direto ou refresh).
+  useEffect(() => {
+    void loadClients();
+  }, [loadClients]);
+
+  // Sincroniza os campos quando o cliente chega (ou muda) da API.
+  useEffect(() => {
+    setNome(client?.nome ?? '');
+    setCnpj(client?.cnpj ?? '');
+  }, [client?.nome, client?.cnpj, client?.version]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const [locationsError, setLocationsError] = useState<string | null>(null);
 
-  if (!client) return <div className="text-slate-500">Cliente não encontrado.</div>;
+  if (!client && (clientsStatus === 'idle' || clientsStatus === 'loading')) {
+    return <LoadingState label="Carregando cliente..." />;
+  }
+  if (!client && clientsStatus === 'error') {
+    return (
+      <ErrorState
+        title="Não foi possível carregar o cliente"
+        message={clientsError ?? 'Tente novamente.'}
+        onRetry={() => void loadClients()}
+      />
+    );
+  }
+  if (!client) {
+    return <ErrorState title="Cliente não encontrado" message="Ele pode ter sido removido ou o link está incorreto." />;
+  }
 
-  async function handleRename() {
-    if (nome === client!.nome) return;
-    const result = await updateClient(client!.id, { nome });
-    if (!result.ok) setEditError(result.error);
-    else setEditError(null);
+  // Salva nome e/ou CNPJ ao sair do campo, só do que mudou.
+  async function handleSave() {
+    const patch: { nome?: string; cnpj?: string } = {};
+    if (nome !== client!.nome) patch.nome = nome;
+    if (cnpj !== (client!.cnpj ?? '')) patch.cnpj = cnpj;
+    if (Object.keys(patch).length === 0) return;
+    const result = await updateClient(client!.id, patch);
+    if (!result.ok) {
+      setEditError(result.error);
+      return;
+    }
+    setEditError(null);
+    setNotice('Alterações salvas.');
   }
 
   async function handleToggleClientActive() {
     const result = await setClientActive(client!.id, !client!.ativo);
-    if (!result.ok) setEditError(result.error);
+    if (!result.ok) {
+      setEditError(result.error);
+      return;
+    }
+    setEditError(null);
+    setNotice(client!.ativo ? 'Cliente inativado.' : 'Cliente ativado.');
   }
 
   async function handleToggleLocationActive(id: string, ativo: boolean) {
@@ -61,14 +111,22 @@ export default function ClientDetailPage() {
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            onBlur={handleRename}
+            onBlur={handleSave}
             className="text-lg sm:text-xl font-extrabold text-navy-900 border-b border-transparent focus:border-navy-700 outline-none w-full sm:flex-1 sm:min-w-[200px]"
           />
           <ActiveBadge ativo={client.ativo} />
         </div>
-        {editError && <p className="text-xs text-red-600 font-semibold mb-3">{editError}</p>}
+        {editError && <p role="alert" className="text-xs text-red-600 font-semibold mb-3">{editError}</p>}
+        {notice && <p role="status" className="text-xs text-emerald-700 font-semibold mb-3">{notice}</p>}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <span className="text-sm text-slate-500 font-mono">{client.cnpj ?? 'CNPJ não informado'}</span>
+          <input
+            value={cnpj}
+            onChange={(e) => setCnpj(e.target.value)}
+            onBlur={handleSave}
+            placeholder="CNPJ não informado"
+            aria-label="CNPJ"
+            className="text-sm text-slate-500 font-mono border-b border-transparent focus:border-navy-700 outline-none w-full sm:w-64"
+          />
           <button
             onClick={handleToggleClientActive}
             className={`text-sm font-semibold ${client.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
