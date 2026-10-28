@@ -57,6 +57,7 @@ export const MOCK_MODELS: InspectionModel[] = [
       {
         id: 'estrutura',
         title: 'Estrutura',
+        displayOrder: 0,
         items: [
           { id: 'e1', title: 'Estrutura sem trincas ou corrosão visível', type: 'CONFORMITY', required: true, needsEvidenceOnNok: true },
           { id: 'e2', title: 'Pintura e identificação em bom estado', type: 'CONFORMITY', required: false, needsEvidenceOnNok: false },
@@ -65,6 +66,7 @@ export const MOCK_MODELS: InspectionModel[] = [
       {
         id: 'seguranca',
         title: 'Segurança',
+        displayOrder: 1,
         items: [
           { id: 's1', title: 'Extintor de incêndio dentro da validade', type: 'CONFORMITY', required: true, needsEvidenceOnNok: false },
           { id: 's2', title: 'Sinalização de segurança visível e legível', type: 'CONFORMITY', required: false, needsEvidenceOnNok: false },
@@ -81,6 +83,7 @@ export const MOCK_MODELS: InspectionModel[] = [
       {
         id: 'eletrica',
         title: 'Elétrica',
+        displayOrder: 2,
         items: [
           { id: 'l1', title: 'Temperatura do painel elétrico (°C)', type: 'NUMBER', required: true, needsEvidenceOnNok: false },
           { id: 'l2', title: 'Observações gerais do quadro elétrico', type: 'TEXT_LONG', required: false, needsEvidenceOnNok: false },
@@ -100,6 +103,7 @@ export const MOCK_MODELS: InspectionModel[] = [
       {
         id: 'epi',
         title: 'EPIs',
+        displayOrder: 0,
         items: [{ id: 'p1', title: 'Uso correto de EPI pela equipe', type: 'CONFORMITY', required: true, needsEvidenceOnNok: true }],
       },
     ],

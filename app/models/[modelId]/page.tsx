@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge } from '@/components/Badges';
 import { ErrorState, InlineError, LoadingState } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import type { ItemType } from '@/types';
 
 const ITEM_TYPES: { value: ItemType; label: string }[] = [
@@ -36,6 +37,7 @@ export default function ModelBuilderPage() {
   const saveModelMeta = useAppStore((s) => s.saveModelMeta);
   const addSection = useAppStore((s) => s.addSection);
   const removeSection = useAppStore((s) => s.removeSection);
+  const moveSection = useAppStore((s) => s.moveSection);
   const updateSectionTitle = useAppStore((s) => s.updateSectionTitle);
   const addItem = useAppStore((s) => s.addItem);
   const removeItem = useAppStore((s) => s.removeItem);
@@ -53,6 +55,7 @@ export default function ModelBuilderPage() {
   const [title, setTitle] = useState(model?.title ?? '');
   const [category, setCategory] = useState(model?.category ?? '');
   const [description, setDescription] = useState(model?.description ?? '');
+  const [orderNotice, setOrderNotice] = useState<string | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [metaNotice, setMetaNotice] = useState<string | null>(null);
 
@@ -68,6 +71,12 @@ export default function ModelBuilderPage() {
     setCategory(model?.category ?? '');
     setDescription(model?.description ?? '');
   }, [model?.title, model?.category, model?.description, model?.lockVersion]);
+
+  useEffect(() => {
+    if (!orderNotice) return;
+    const timer = setTimeout(() => setOrderNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [orderNotice]);
 
   useEffect(() => {
     if (!metaNotice) return;
@@ -92,6 +101,15 @@ export default function ModelBuilderPage() {
 
   // RN-018: só o rascunho pode ser alterado livremente.
   const isDraft = model.status === 'RASCUNHO';
+
+  // RN-017: as seções são exibidas na ordem explícita (displayOrder).
+  const orderedSections = normalizeSectionOrder(model.sections);
+
+  function handleMoveSection(sectionId: string, title: string, index: number, direction: MoveDirection) {
+    moveSection(model!.id, sectionId, direction);
+    const position = direction === 'up' ? index : index + 2;
+    setOrderNotice(`Seção "${title}" movida para a posição ${position}.`);
+  }
 
   async function handleSaveMeta() {
     const patch: { title?: string; category?: string; description?: string } = {};
@@ -209,7 +227,13 @@ export default function ModelBuilderPage() {
             </div>
           )}
 
-          {model.sections.map((section, sIdx) => (
+          {orderedSections.length > 1 && (
+            <p role="status" aria-live="polite" className="text-xs text-emerald-700 font-semibold mb-2 min-h-4">
+              {orderNotice}
+            </p>
+          )}
+
+          {orderedSections.map((section, sIdx) => (
             <div key={section.id} className="bg-white border border-slate-200 rounded-2xl p-5 mb-4">
               <div className="flex items-center gap-3 mb-4">
                 <span className="w-6 h-6 rounded-full bg-navy-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
@@ -220,6 +244,28 @@ export default function ModelBuilderPage() {
                   onChange={(e) => updateSectionTitle(model.id, section.id, e.target.value)}
                   className="flex-1 border-b border-slate-200 focus:border-navy-700 outline-none font-bold text-navy-900 py-1 min-w-0"
                 />
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleMoveSection(section.id, section.title, sIdx, 'up')}
+                    disabled={sIdx === 0}
+                    aria-label={`Mover a seção ${section.title} para cima`}
+                    title="Mover para cima"
+                    className="w-7 h-7 rounded-lg border border-slate-300 text-slate-600 text-xs font-bold disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMoveSection(section.id, section.title, sIdx, 'down')}
+                    disabled={sIdx === orderedSections.length - 1}
+                    aria-label={`Mover a seção ${section.title} para baixo`}
+                    title="Mover para baixo"
+                    className="w-7 h-7 rounded-lg border border-slate-300 text-slate-600 text-xs font-bold disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                </div>
                 <span className="text-xs font-semibold text-slate-400 shrink-0 whitespace-nowrap">
                   {section.items.length} {section.items.length === 1 ? 'item' : 'itens'}
                 </span>
@@ -367,7 +413,7 @@ export default function ModelBuilderPage() {
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto p-6">
             <h3 className="font-extrabold text-navy-900 mb-1">{model.title}</h3>
             <p className="text-sm text-slate-500 mb-4">Prévia de como o técnico verá no aplicativo</p>
-            {model.sections.map((sec) => (
+            {orderedSections.map((sec) => (
               <div key={sec.id} className="mb-4">
                 <div className="text-xs font-extrabold text-navy-700 uppercase mb-2">{sec.title}</div>
                 {sec.items.map((it) => (

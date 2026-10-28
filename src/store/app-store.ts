@@ -40,6 +40,7 @@ import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
+import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
@@ -141,6 +142,8 @@ interface AppState {
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
   addSection: (modelId: string) => void;
   removeSection: (modelId: string, sectionId: string) => void;
+  /** RN-017: sobe/desce a seção e renumera a ordem (0, 1, 2…, única na versão). */
+  moveSection: (modelId: string, sectionId: string, direction: MoveDirection) => void;
   updateSectionTitle: (modelId: string, sectionId: string, title: string) => void;
   addItem: (modelId: string, sectionId: string) => void;
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
@@ -765,17 +768,39 @@ export const useAppStore = create<AppState>()(
     },
 
     addSection: (modelId) => {
-      const section: ModelSection = { id: newId('sec'), title: 'Nova seção', items: [] };
       set((s) => ({
-        models: s.models.map((m) => (m.id === modelId ? { ...m, sections: [...m.sections, section] } : m)),
+        models: s.models.map((m) => {
+          if (m.id !== modelId) return m;
+          // A nova seção entra no fim, com a próxima ordem (RN-017).
+          const section: ModelSection = {
+            id: newId('sec'),
+            title: 'Nova seção',
+            displayOrder: nextDisplayOrder(m.sections),
+            items: [],
+          };
+          return { ...m, sections: [...m.sections, section] };
+        }),
       }));
     },
 
     removeSection: (modelId, sectionId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId ? { ...m, sections: m.sections.filter((sec) => sec.id !== sectionId) } : m
+          m.id === modelId
+            ? { ...m, sections: normalizeSectionOrder(m.sections.filter((sec) => sec.id !== sectionId)) }
+            : m
         ),
+      }));
+    },
+
+    moveSection: (modelId, sectionId, direction) => {
+      set((s) => ({
+        models: s.models.map((m) => {
+          if (m.id !== modelId) return m;
+          const sections = moveSectionInList(m.sections, sectionId, direction);
+          // Primeira/última seção (ou id desconhecido): nada muda.
+          return sections === m.sections ? m : { ...m, sections, updatedAt: new Date().toISOString() };
+        }),
       }));
     },
 

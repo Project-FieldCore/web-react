@@ -132,7 +132,7 @@ describe('useAppStore construtor de modelos — #134', () => {
     });
 
     it('recarregar mantém as seções que já estão na tela (a API ainda não as devolve)', async () => {
-      const section = { id: 'sec-1', title: 'Seção local', items: [] };
+      const section = { id: 'sec-1', title: 'Seção local', displayOrder: 0, items: [] };
       useAppStore.setState((s) => ({ models: [{ ...apiModel, sections: [section] }, ...s.models] }));
       mocked(modelsApi.getModel).mockResolvedValue({ ...apiModel, title: 'Renomeado por outra pessoa', lockVersion: 3 });
 
@@ -172,7 +172,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       version: 0,
       lockVersion: 4,
       updatedAt: '2026-10-01T10:00:00.000Z',
-      sections: [{ id: 'sec-1', title: 'Seção local', items: [] }],
+      sections: [{ id: 'sec-1', title: 'Seção local', displayOrder: 0, items: [] }],
     };
 
     beforeEach(() => {
@@ -345,6 +345,81 @@ describe('useAppStore construtor de modelos — #134', () => {
 
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
       expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.status).toBe('RASCUNHO');
+    });
+  });
+
+  describe('ordenação das seções (RN-017)', () => {
+    const orderOf = (modelId: string) =>
+      useAppStore.getState().models.find((m) => m.id === modelId)!.sections.map((sec) => [sec.id, sec.displayOrder]);
+
+    beforeEach(() => {
+      useAppStore.setState((s) => ({
+        models: s.models.map((m) =>
+          m.id === DRAFT_ID
+            ? {
+                ...m,
+                sections: [
+                  { id: 'a', title: 'A', displayOrder: 0, items: [] },
+                  { id: 'b', title: 'B', displayOrder: 1, items: [] },
+                  { id: 'c', title: 'C', displayOrder: 2, items: [] },
+                ],
+              }
+            : m
+        ),
+      }));
+    });
+
+    it('moveSection sobe e desce renumerando a ordem (0, 1, 2…)', () => {
+      useAppStore.getState().moveSection(DRAFT_ID, 'c', 'up');
+      expect(orderOf(DRAFT_ID)).toEqual([['a', 0], ['c', 1], ['b', 2]]);
+
+      useAppStore.getState().moveSection(DRAFT_ID, 'a', 'down');
+      expect(orderOf(DRAFT_ID)).toEqual([['c', 0], ['a', 1], ['b', 2]]);
+    });
+
+    it('moveSection na primeira (subir) e na última (descer) não muda nada', () => {
+      const before = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!;
+
+      useAppStore.getState().moveSection(DRAFT_ID, 'a', 'up');
+      useAppStore.getState().moveSection(DRAFT_ID, 'c', 'down');
+
+      expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)).toBe(before);
+    });
+
+    it('moveSection atualiza o updatedAt só quando muda de fato', () => {
+      const before = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.updatedAt;
+
+      useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
+
+      expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.updatedAt).not.toBe(before);
+    });
+
+    it('moveSection só mexe no modelo pedido', () => {
+      const published = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+
+      useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
+
+      expect(useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)).toBe(published);
+    });
+
+    it('addSection coloca a nova seção no fim com a próxima ordem', () => {
+      useAppStore.getState().addSection(DRAFT_ID);
+
+      const sections = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.sections;
+      expect(sections.map((sec) => sec.displayOrder)).toEqual([0, 1, 2, 3]);
+      expect(sections[3].title).toBe('Nova seção');
+    });
+
+    it('removeSection renumera para não deixar lacuna na ordem', () => {
+      useAppStore.getState().removeSection(DRAFT_ID, 'a');
+
+      expect(orderOf(DRAFT_ID)).toEqual([['b', 0], ['c', 1]]);
+    });
+
+    it('os modelos de exemplo já têm ordem explícita, única e contígua', () => {
+      for (const model of useAppStore.getState().models) {
+        expect(model.sections.map((sec) => sec.displayOrder)).toEqual(model.sections.map((_, i) => i));
+      }
     });
   });
 });

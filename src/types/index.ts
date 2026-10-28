@@ -41,6 +41,9 @@ export interface ModelItem {
 export interface ModelSection {
   id: string;
   title: string;
+  description?: string;
+  /** RN-017: ordem explícita (0, 1, 2…), única dentro da versão do modelo. */
+  displayOrder: number;
   items: ModelItem[];
 }
 
