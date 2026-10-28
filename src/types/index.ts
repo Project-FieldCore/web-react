@@ -83,6 +83,8 @@ export interface Client {
   cnpj?: string;
   /** RN-013: inativação em vez de exclusão física. */
   ativo: boolean;
+  /** Versão da API (trava otimista): obrigatória para editar e mudar status. */
+  version?: number;
 }
 
 export interface Location {

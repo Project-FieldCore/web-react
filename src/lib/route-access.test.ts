@@ -14,6 +14,12 @@ describe('isAllowed', () => {
     }
   });
 
+  it('SUPERVISOR acessa clientes e locais (a API libera ADMIN e SUPERVISOR em /clients)', () => {
+    for (const path of ['/clients', '/clients/abc', '/clients/abc/sites/xyz']) {
+      expect(isAllowed(path, 'SUPERVISOR')).toBe(true);
+    }
+  });
+
   it('SUPERVISOR não acessa as áreas restritas a ADMIN, nem subrotas', () => {
     for (const prefix of ADMIN_ONLY_PREFIXES) {
       expect(isAllowed(prefix, 'SUPERVISOR')).toBe(false);

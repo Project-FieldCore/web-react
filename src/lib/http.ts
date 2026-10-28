@@ -60,6 +60,8 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   EMAIL_ALREADY_EXISTS: 'Já existe um usuário com esse e-mail.',
   VERSION_CONFLICT: 'Este registro foi alterado por outra pessoa. Os dados foram recarregados — tente de novo.',
   USER_NOT_FOUND: 'Usuário não encontrado. Ele pode ter sido removido.',
+  DOCUMENT_ALREADY_EXISTS: 'Já existe um cliente com esse CNPJ.',
+  CLIENT_NOT_FOUND: 'Cliente não encontrado. Ele pode ter sido removido.',
   // 409 genérico (violação de integridade no banco, sem código específico).
   CONFLICT: 'Não foi possível salvar: os dados conflitam com um registro existente.',
 };

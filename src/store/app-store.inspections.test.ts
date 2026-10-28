@@ -87,6 +87,19 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
     });
 
+    it('cliente inativo fica fora de novos agendamentos e não chama a API', async () => {
+      const initialClients = useAppStore.getState().clients;
+      useAppStore.setState({ clients: [{ id: 'cli-1', nome: 'Acme', ativo: false, version: 1 }] });
+      try {
+        const result = await useAppStore.getState().scheduleInspection(input);
+
+        expect(result).toEqual({ ok: false, error: 'Cliente inativo não pode receber novos agendamentos.' });
+        expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+      } finally {
+        useAppStore.setState({ clients: initialClients });
+      }
+    });
+
     it('RN-025: data prevista obrigatória', async () => {
       const result = await useAppStore.getState().scheduleInspection({ ...input, dataPrevista: '' });
 

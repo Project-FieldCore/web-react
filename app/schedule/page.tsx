@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InlineError } from '@/components/States';
@@ -19,6 +19,8 @@ export default function SchedulePage() {
   const router = useRouter();
   const models = useAppStore((s) => s.models.filter((m) => m.status === 'PUBLICADO'));
   const clients = useAppStore((s) => s.clients);
+  const clientsStatus = useAppStore((s) => s.clientsStatus);
+  const loadClients = useAppStore((s) => s.loadClients);
   const locations = useAppStore((s) => s.locations);
   const equipment = useAppStore((s) => s.equipment);
   const technicians = useAppStore((s) => s.users.filter((u) => u.role === 'TECHNICIAN'));
@@ -34,6 +36,13 @@ export default function SchedulePage() {
   const [orientacoes, setOrientacoes] = useState('');
   const submit = useAsyncAction();
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Clientes vêm da API; cliente inativo fica fora de novos agendamentos.
+  useEffect(() => {
+    void loadClients();
+  }, [loadClients]);
+  const activeClients = useMemo(() => clients.filter((c) => c.ativo), [clients]);
+  const clientsLoading = clientsStatus === 'idle' || clientsStatus === 'loading';
 
   const availableLocations = useMemo(() => locations.filter((l) => l.clienteId === clienteId), [locations, clienteId]);
   const availableEquipment = useMemo(() => equipment.filter((e) => e.localId === localId), [equipment, localId]);
@@ -99,11 +108,20 @@ export default function SchedulePage() {
                 <select
                   value={clienteId}
                   onChange={(e) => { setClienteId(e.target.value); setLocalId(''); setEquipamentoId(''); }}
-                  className="input"
+                  disabled={clientsLoading}
+                  className="input disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">Selecione...</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  <option value="">{clientsLoading ? 'Carregando clientes...' : 'Selecione...'}</option>
+                  {activeClients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                 </select>
+                {clientsStatus === 'error' && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                    Não foi possível carregar os clientes.{' '}
+                    <button type="button" onClick={() => void loadClients()} className="underline">
+                      Tentar novamente
+                    </button>
+                  </p>
+                )}
               </Field>
               <Field label="Local" required>
                 <select
