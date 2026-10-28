@@ -32,8 +32,10 @@ export interface ModelItem {
   title: string;
   type: ItemType;
   required: boolean;
-  /** RN-039: item crítico — exige evidência quando não conforme. */
-  needsEvidenceOnNok: boolean;
+  /** RN-039: item crítico — exige evidência quando não conforme (`evidence_required_on_failure` na API). */
+  evidenceRequiredOnFailure: boolean;
+  /** Exige observação quando não conforme (`observation_required_on_failure` na API). */
+  observationRequiredOnFailure: boolean;
   /** Alternativas disponíveis quando type === 'SINGLE_CHOICE'. */
   options?: string[];
 }

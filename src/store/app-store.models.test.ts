@@ -422,4 +422,91 @@ describe('useAppStore construtor de modelos — #134', () => {
       }
     });
   });
+
+  describe('regras por item: obrigatório, observação e evidência (PBI-0021.1)', () => {
+    const itemsOf = (modelId: string, sectionIndex = 0) =>
+      useAppStore.getState().models.find((m) => m.id === modelId)!.sections[sectionIndex].items;
+
+    beforeEach(() => {
+      useAppStore.setState((s) => ({
+        models: s.models.map((m) =>
+          m.id === DRAFT_ID ? { ...m, sections: [{ id: 'sec', title: 'Seção', displayOrder: 0, items: [] }] } : m
+        ),
+      }));
+    });
+
+    it('addItem cria o item com as três flags desligadas', () => {
+      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+
+      expect(itemsOf(DRAFT_ID)[0]).toMatchObject({
+        type: 'CONFORMITY',
+        required: false,
+        observationRequiredOnFailure: false,
+        evidenceRequiredOnFailure: false,
+      });
+    });
+
+    it('updateItem liga e desliga cada flag de forma independente', () => {
+      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+      const id = itemsOf(DRAFT_ID)[0].id;
+
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { required: true });
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
+      expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ required: true, observationRequiredOnFailure: true, evidenceRequiredOnFailure: false });
+
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: false });
+      expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ required: true, observationRequiredOnFailure: false, evidenceRequiredOnFailure: true });
+    });
+
+    it('trocar para um tipo sem "falha" desliga observação e evidência, mas mantém o obrigatório', () => {
+      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+      const id = itemsOf(DRAFT_ID)[0].id;
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, {
+        required: true,
+        observationRequiredOnFailure: true,
+        evidenceRequiredOnFailure: true,
+      });
+
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'TEXT_SHORT' });
+
+      expect(itemsOf(DRAFT_ID)[0]).toMatchObject({
+        type: 'TEXT_SHORT',
+        required: true,
+        observationRequiredOnFailure: false,
+        evidenceRequiredOnFailure: false,
+      });
+    });
+
+    it('voltar para conformidade não religa as flags sozinho', () => {
+      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+      const id = itemsOf(DRAFT_ID)[0].id;
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'NUMBER' });
+
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'CONFORMITY' });
+
+      expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ evidenceRequiredOnFailure: false, observationRequiredOnFailure: false });
+    });
+
+    it('não é possível ligar a regra "na falha" num item que não é de conformidade', () => {
+      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+      const id = itemsOf(DRAFT_ID)[0].id;
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'DATE' });
+
+      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
+
+      expect(itemsOf(DRAFT_ID)[0].observationRequiredOnFailure).toBe(false);
+    });
+
+    it('os modelos de exemplo têm as três flags definidas em todos os itens', () => {
+      for (const model of useAppStore.getState().models) {
+        for (const item of model.sections.flatMap((sec) => sec.items)) {
+          expect(typeof item.required).toBe('boolean');
+          expect(typeof item.evidenceRequiredOnFailure).toBe('boolean');
+          expect(typeof item.observationRequiredOnFailure).toBe('boolean');
+        }
+      }
+    });
+  });
 });

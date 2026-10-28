@@ -250,6 +250,107 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(useAppStore.getState().syncQueue.map((q) => q.inspectionId)).toEqual([ASSIGNED_ID]);
     });
 
+    describe('regras "na falha" por item (PBI-0021.1)', () => {
+      const MODEL_ID = 'mod-1';
+      const ITEM_ID = 'e1'; // item de conformidade do modelo de exemplo
+
+      function setItemFlags(patch: { observationRequiredOnFailure?: boolean; evidenceRequiredOnFailure?: boolean }) {
+        useAppStore.setState((s) => ({
+          models: s.models.map((m) =>
+            m.id === MODEL_ID
+              ? { ...m, sections: m.sections.map((sec) => ({ ...sec, items: sec.items.map((it) => (it.id === ITEM_ID ? { ...it, ...patch } : it)) })) }
+              : m
+          ),
+        }));
+      }
+
+      function answerNonConforming(observacao?: string, evidenceCount = 0) {
+        fillAllAnswers(SENT_ID);
+        useAppStore.setState((s) => ({
+          inspections: s.inspections.map((i) =>
+            i.id === SENT_ID
+              ? {
+                  ...i,
+                  answers: { ...i.answers, [ITEM_ID]: { itemId: ITEM_ID, conformity: 'NAO_CONFORME', observacao, evidenceCount } },
+                  nonConformities: { ...i.nonConformities, [ITEM_ID]: { itemId: ITEM_ID, status: 'ABERTA', evidenceCount } as never },
+                }
+              : i
+          ),
+        }));
+        mocked(inspectionsApi.syncResponses).mockResolvedValue(find(SENT_ID));
+        mocked(inspectionsApi.submitInspection).mockResolvedValue({ ...find(SENT_ID), status: 'ENVIADA' });
+      }
+
+      it('observação obrigatória: não conforme sem observação bloqueia o envio, sem chamar a API', async () => {
+        setItemFlags({ observationRequiredOnFailure: true, evidenceRequiredOnFailure: false });
+        answerNonConforming(undefined);
+
+        const result = await useAppStore.getState().submitInspection(SENT_ID);
+
+        expect(result.ok).toBe(false);
+        expect((result as { error: string }).error).toContain('exige uma observação quando não conforme');
+        expect(inspectionsApi.syncResponses).not.toHaveBeenCalled();
+      });
+
+      it('observação só com espaços conta como vazia', async () => {
+        setItemFlags({ observationRequiredOnFailure: true, evidenceRequiredOnFailure: false });
+        answerNonConforming('   ');
+
+        const result = await useAppStore.getState().submitInspection(SENT_ID);
+
+        expect(result.ok).toBe(false);
+        expect(inspectionsApi.submitInspection).not.toHaveBeenCalled();
+      });
+
+      it('observação preenchida libera o envio', async () => {
+        setItemFlags({ observationRequiredOnFailure: true, evidenceRequiredOnFailure: false });
+        answerNonConforming('Corrosão na base.');
+
+        const result = await useAppStore.getState().submitInspection(SENT_ID);
+
+        expect(result).toEqual({ ok: true });
+        expect(inspectionsApi.submitInspection).toHaveBeenCalledWith(SENT_ID);
+      });
+
+      it('sem a flag de observação, não conforme sem observação continua podendo enviar', async () => {
+        setItemFlags({ observationRequiredOnFailure: false, evidenceRequiredOnFailure: false });
+        answerNonConforming(undefined);
+
+        expect((await useAppStore.getState().submitInspection(SENT_ID)).ok).toBe(true);
+      });
+
+      it('conforme não exige observação, mesmo com a flag ligada', async () => {
+        setItemFlags({ observationRequiredOnFailure: true, evidenceRequiredOnFailure: true });
+        fillAllAnswers(SENT_ID);
+        mocked(inspectionsApi.syncResponses).mockResolvedValue(find(SENT_ID));
+        mocked(inspectionsApi.submitInspection).mockResolvedValue({ ...find(SENT_ID), status: 'ENVIADA' });
+
+        expect((await useAppStore.getState().submitInspection(SENT_ID)).ok).toBe(true);
+      });
+
+      it('evidência obrigatória (RN-039): não conforme sem evidência bloqueia, com evidência libera', async () => {
+        setItemFlags({ observationRequiredOnFailure: false, evidenceRequiredOnFailure: true });
+        answerNonConforming('Corrosão.', 0);
+
+        const blocked = await useAppStore.getState().submitInspection(SENT_ID);
+        expect(blocked.ok).toBe(false);
+        expect((blocked as { error: string }).error).toContain('exige evidência');
+        expect(inspectionsApi.syncResponses).not.toHaveBeenCalled();
+
+        answerNonConforming('Corrosão.', 2);
+        expect((await useAppStore.getState().submitInspection(SENT_ID)).ok).toBe(true);
+      });
+
+      it('com as duas regras, a observação é cobrada antes da evidência', async () => {
+        setItemFlags({ observationRequiredOnFailure: true, evidenceRequiredOnFailure: true });
+        answerNonConforming(undefined, 0);
+
+        const result = await useAppStore.getState().submitInspection(SENT_ID);
+
+        expect((result as { error: string }).error).toContain('observação');
+      });
+    });
+
     it('submitInspection mantém a fila e o status quando a API falha', async () => {
       fillAllAnswers(SENT_ID);
       useAppStore.getState().saveAnswer(SENT_ID, 'e1', { conformity: 'CONFORME' });

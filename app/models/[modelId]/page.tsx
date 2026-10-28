@@ -7,6 +7,7 @@ import { ModelStatusBadge } from '@/components/Badges';
 import { ErrorState, InlineError, LoadingState } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
+import { supportsFailureRules } from '@/lib/item-rules';
 import type { ItemType } from '@/types';
 
 const ITEM_TYPES: { value: ItemType; label: string }[] = [
@@ -129,7 +130,8 @@ export default function ModelBuilderPage() {
 
   const totalItems = model.sections.reduce((sum, s) => sum + s.items.length, 0);
   const requiredItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.required).length, 0);
-  const criticalItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.needsEvidenceOnNok).length, 0);
+  const criticalItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.evidenceRequiredOnFailure).length, 0);
+  const observationItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.observationRequiredOnFailure).length, 0);
 
   // Espelha as validações de publishModel (RN-015) para orientar o usuário antes de tentar publicar.
   const titleOk = model.title.trim().length > 0;
@@ -305,15 +307,32 @@ export default function ModelBuilderPage() {
                         />
                         Obrigatório
                       </label>
-                      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                        <input
-                          type="checkbox"
-                          checked={item.needsEvidenceOnNok}
-                          onChange={(e) => updateItem(model.id, section.id, item.id, { needsEvidenceOnNok: e.target.checked })}
-                        />
-                        Exige evidência se não conforme (RN-039)
-                      </label>
+                      {supportsFailureRules(item.type) && (
+                        <>
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={item.observationRequiredOnFailure}
+                              onChange={(e) => updateItem(model.id, section.id, item.id, { observationRequiredOnFailure: e.target.checked })}
+                            />
+                            Exige observação se não conforme
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={item.evidenceRequiredOnFailure}
+                              onChange={(e) => updateItem(model.id, section.id, item.id, { evidenceRequiredOnFailure: e.target.checked })}
+                            />
+                            Exige evidência se não conforme (RN-039)
+                          </label>
+                        </>
+                      )}
                     </div>
+                    {!supportsFailureRules(item.type) && (
+                      <p className="mt-2 text-[11px] text-slate-400">
+                        Observação e evidência por falha só se aplicam a itens do tipo Conforme/Não conforme.
+                      </p>
+                    )}
                     {item.type === 'SINGLE_CHOICE' && (
                       <div className="mt-2.5">
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Alternativas (separadas por vírgula)</label>
@@ -356,6 +375,7 @@ export default function ModelBuilderPage() {
               <SummaryRow label="Seções" value={model.sections.length} />
               <SummaryRow label="Itens" value={totalItems} />
               <SummaryRow label="Obrigatórios" value={requiredItems} />
+              <SummaryRow label="Exigem observação" value={observationItems} />
               <SummaryRow label="Críticos (RN-039)" value={criticalItems} />
             </dl>
           </div>
