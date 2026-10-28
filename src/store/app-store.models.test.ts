@@ -6,6 +6,8 @@ import type { InspectionModel } from '@/types';
 
 vi.mock('@/lib/models-api', () => ({
   createModel: vi.fn(),
+  getModel: vi.fn(),
+  updateModelMeta: vi.fn(),
   saveModel: vi.fn(),
   publishModel: vi.fn(),
 }));
@@ -22,37 +24,250 @@ const DRAFT_ID = 'mod-2';
 describe('useAppStore construtor de modelos — #134', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useAppStore.setState({ models: structuredClone(MOCK_MODELS) });
+    useAppStore.setState({ models: structuredClone(MOCK_MODELS), modelLoad: { id: null, status: 'idle', error: null } });
   });
 
   describe('createDraftModel', () => {
-    it('chama a API e adiciona o rascunho devolvido (com o id do servidor)', async () => {
+    const input = { title: 'Inspeção de extintores', category: 'Segurança', description: '  Checklist mensal  ' };
+
+    it('chama a API com título/categoria/descrição e adiciona o rascunho devolvido (com o id do servidor)', async () => {
       const draft: InspectionModel = {
         id: 'srv-77',
-        title: 'Novo modelo de inspeção',
-        description: '',
-        category: 'Geral',
+        title: 'Inspeção de extintores',
+        description: 'Checklist mensal',
+        category: 'Segurança',
         status: 'RASCUNHO',
-        version: 1,
+        version: 0,
+        lockVersion: 0,
         updatedAt: '2026-10-01T10:00:00.000Z',
         sections: [],
       };
       mocked(modelsApi.createModel).mockResolvedValue(draft);
 
-      const result = await useAppStore.getState().createDraftModel();
+      const result = await useAppStore.getState().createDraftModel(input);
 
       expect(result).toEqual({ ok: true, id: 'srv-77' });
+      expect(modelsApi.createModel).toHaveBeenCalledWith({
+        title: 'Inspeção de extintores',
+        category: 'Segurança',
+        description: 'Checklist mensal',
+      });
       expect(useAppStore.getState().models[0]).toEqual(draft);
+    });
+
+    it('RN-015: título e categoria são obrigatórios e não chamam a API', async () => {
+      expect(await useAppStore.getState().createDraftModel({ ...input, title: '   ' })).toEqual({
+        ok: false,
+        error: 'Informe o título do modelo.',
+      });
+      expect(await useAppStore.getState().createDraftModel({ ...input, category: '' })).toEqual({
+        ok: false,
+        error: 'Informe a categoria do modelo.',
+      });
+      expect(modelsApi.createModel).not.toHaveBeenCalled();
+    });
+
+    it('respeita os limites da API (título 160, categoria 100, descrição 1000)', async () => {
+      const long = (n: number) => 'x'.repeat(n);
+
+      expect((await useAppStore.getState().createDraftModel({ ...input, title: long(161) })).ok).toBe(false);
+      expect((await useAppStore.getState().createDraftModel({ ...input, category: long(101) })).ok).toBe(false);
+      expect((await useAppStore.getState().createDraftModel({ ...input, description: long(1001) })).ok).toBe(false);
+      expect(modelsApi.createModel).not.toHaveBeenCalled();
+    });
+
+    it('descrição vazia não é enviada', async () => {
+      mocked(modelsApi.createModel).mockResolvedValue({ ...MOCK_MODELS[1], id: 'srv-1' });
+
+      await useAppStore.getState().createDraftModel({ title: 'A', category: 'B', description: '   ' });
+
+      expect(modelsApi.createModel).toHaveBeenCalledWith({ title: 'A', category: 'B', description: undefined });
+    });
+
+    it('título repetido (409) volta com a mensagem em português e não cria nada', async () => {
+      mocked(modelsApi.createModel).mockRejectedValue(
+        new ApiError('Já existe um modelo com esse título. Escolha outro título.', 409, undefined, 'TEMPLATE_TITLE_ALREADY_EXISTS')
+      );
+      const before = useAppStore.getState().models.length;
+
+      const result = await useAppStore.getState().createDraftModel(input);
+
+      expect(result).toEqual({ ok: false, error: 'Já existe um modelo com esse título. Escolha outro título.' });
+      expect(useAppStore.getState().models).toHaveLength(before);
     });
 
     it('não cria nada localmente quando a API falha', async () => {
       mocked(modelsApi.createModel).mockRejectedValue(new NetworkError('Sem conexão.'));
       const before = useAppStore.getState().models.length;
 
-      const result = await useAppStore.getState().createDraftModel();
+      const result = await useAppStore.getState().createDraftModel(input);
 
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
       expect(useAppStore.getState().models).toHaveLength(before);
+    });
+  });
+
+  describe('loadModel', () => {
+    const apiModel: InspectionModel = {
+      id: 'srv-1',
+      title: 'Do servidor',
+      description: '',
+      category: 'Geral',
+      status: 'RASCUNHO',
+      version: 0,
+      lockVersion: 2,
+      updatedAt: '2026-10-01T10:00:00.000Z',
+      sections: [],
+    };
+
+    it('carrega pela API, acrescenta ao store e marca como pronto', async () => {
+      mocked(modelsApi.getModel).mockResolvedValue(apiModel);
+
+      const promise = useAppStore.getState().loadModel('srv-1');
+      expect(useAppStore.getState().modelLoad).toEqual({ id: 'srv-1', status: 'loading', error: null });
+      await promise;
+
+      expect(useAppStore.getState().models[0]).toEqual(apiModel);
+      expect(useAppStore.getState().modelLoad).toEqual({ id: 'srv-1', status: 'ready', error: null });
+    });
+
+    it('recarregar mantém as seções que já estão na tela (a API ainda não as devolve)', async () => {
+      const section = { id: 'sec-1', title: 'Seção local', items: [] };
+      useAppStore.setState((s) => ({ models: [{ ...apiModel, sections: [section] }, ...s.models] }));
+      mocked(modelsApi.getModel).mockResolvedValue({ ...apiModel, title: 'Renomeado por outra pessoa', lockVersion: 3 });
+
+      await useAppStore.getState().loadModel('srv-1');
+
+      const model = useAppStore.getState().models.find((m) => m.id === 'srv-1')!;
+      expect(model).toMatchObject({ title: 'Renomeado por outra pessoa', lockVersion: 3 });
+      expect(model.sections).toEqual([section]);
+    });
+
+    it('404 vira "not-found"', async () => {
+      mocked(modelsApi.getModel).mockRejectedValue(
+        new ApiError('Modelo não encontrado.', 404, undefined, 'INSPECTION_TEMPLATE_NOT_FOUND')
+      );
+
+      await useAppStore.getState().loadModel('nao-existe');
+
+      expect(useAppStore.getState().modelLoad).toMatchObject({ id: 'nao-existe', status: 'not-found' });
+    });
+
+    it('erro de rede vira "error" com a mensagem', async () => {
+      mocked(modelsApi.getModel).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+      await useAppStore.getState().loadModel('srv-1');
+
+      expect(useAppStore.getState().modelLoad).toEqual({ id: 'srv-1', status: 'error', error: 'Sem conexão.' });
+    });
+  });
+
+  describe('saveModelMeta (RN-018: edição livre em rascunho)', () => {
+    const apiDraft: InspectionModel = {
+      id: 'srv-1',
+      title: 'Original',
+      description: 'Desc',
+      category: 'Geral',
+      status: 'RASCUNHO',
+      version: 0,
+      lockVersion: 4,
+      updatedAt: '2026-10-01T10:00:00.000Z',
+      sections: [{ id: 'sec-1', title: 'Seção local', items: [] }],
+    };
+
+    beforeEach(() => {
+      useAppStore.setState((s) => ({ models: [apiDraft, ...s.models] }));
+    });
+
+    it('envia o lockVersion e só o que mudou, guarda o retorno e mantém as seções locais', async () => {
+      mocked(modelsApi.updateModelMeta).mockResolvedValue({ ...apiDraft, title: 'Novo título', lockVersion: 5, sections: [] });
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { title: '  Novo título  ' });
+
+      expect(result).toEqual({ ok: true });
+      expect(modelsApi.updateModelMeta).toHaveBeenCalledWith(
+        'srv-1',
+        { title: 'Novo título', category: undefined, description: undefined },
+        4
+      );
+      const saved = useAppStore.getState().models.find((m) => m.id === 'srv-1')!;
+      expect(saved).toMatchObject({ title: 'Novo título', lockVersion: 5 });
+      expect(saved.sections).toEqual(apiDraft.sections);
+    });
+
+    it('não chama a API com título ou categoria vazios', async () => {
+      expect(await useAppStore.getState().saveModelMeta('srv-1', { title: ' ' })).toEqual({ ok: false, error: 'Informe o título do modelo.' });
+      expect(await useAppStore.getState().saveModelMeta('srv-1', { category: '' })).toEqual({ ok: false, error: 'Informe a categoria do modelo.' });
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
+    });
+
+    it('descrição pode ser limpa (vazia é válida)', async () => {
+      mocked(modelsApi.updateModelMeta).mockResolvedValue({ ...apiDraft, description: '', lockVersion: 5 });
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { description: '' });
+
+      expect(result).toEqual({ ok: true });
+      expect(modelsApi.updateModelMeta).toHaveBeenCalledWith('srv-1', { title: undefined, category: undefined, description: '' }, 4);
+    });
+
+    it('modelo que não é rascunho não pode ser editado e não chama a API', async () => {
+      useAppStore.setState((s) => ({ models: s.models.map((m) => (m.id === 'srv-1' ? { ...m, status: 'PUBLICADO' } : m)) }));
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Outro' });
+
+      expect(result).toEqual({ ok: false, error: 'Só modelos em rascunho podem ser editados.' });
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
+    });
+
+    it('título repetido (409) volta com a mensagem e mantém o modelo como estava', async () => {
+      mocked(modelsApi.updateModelMeta).mockRejectedValue(
+        new ApiError('Já existe um modelo com esse título. Escolha outro título.', 409, undefined, 'TEMPLATE_TITLE_ALREADY_EXISTS')
+      );
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Repetido' });
+
+      expect(result).toEqual({ ok: false, error: 'Já existe um modelo com esse título. Escolha outro título.' });
+      expect(useAppStore.getState().models.find((m) => m.id === 'srv-1')!.title).toBe('Original');
+      expect(modelsApi.getModel).not.toHaveBeenCalled();
+    });
+
+    it('VERSION_CONFLICT recarrega o modelo e devolve a mensagem', async () => {
+      mocked(modelsApi.updateModelMeta).mockRejectedValue(
+        new ApiError('Este registro foi alterado por outra pessoa.', 409, undefined, 'VERSION_CONFLICT')
+      );
+      mocked(modelsApi.getModel).mockResolvedValue({ ...apiDraft, title: 'Editado por outra pessoa', lockVersion: 9, sections: [] });
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Minha edição' });
+
+      expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+      expect(useAppStore.getState().models.find((m) => m.id === 'srv-1')).toMatchObject({ title: 'Editado por outra pessoa', lockVersion: 9 });
+    });
+
+    it('TEMPLATE_NOT_EDITABLE (publicado por outra pessoa) recarrega e mostra o status atual', async () => {
+      mocked(modelsApi.updateModelMeta).mockRejectedValue(
+        new ApiError('Só modelos em rascunho podem ser editados.', 409, undefined, 'TEMPLATE_NOT_EDITABLE')
+      );
+      mocked(modelsApi.getModel).mockResolvedValue({ ...apiDraft, status: 'PUBLICADO', version: 1, lockVersion: 6, sections: [] });
+
+      const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Tarde demais' });
+
+      expect(result.ok).toBe(false);
+      expect(useAppStore.getState().models.find((m) => m.id === 'srv-1')!.status).toBe('PUBLICADO');
+    });
+
+    it('modelo local (dados de exemplo, sem lockVersion) é editado só na tela, sem chamar a API', async () => {
+      const result = await useAppStore.getState().saveModelMeta(DRAFT_ID, { title: 'Só local' });
+
+      expect(result).toEqual({ ok: true });
+      expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.title).toBe('Só local');
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
+    });
+
+    it('modelo inexistente não chama a API', async () => {
+      const result = await useAppStore.getState().saveModelMeta('nao-existe', { title: 'X' });
+
+      expect(result).toEqual({ ok: false, error: 'Modelo não encontrado.' });
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
     });
   });
 

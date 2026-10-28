@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge } from '@/components/Badges';
-import { ErrorState, InlineError } from '@/components/States';
+import { ErrorState, InlineError, LoadingState } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { ItemType } from '@/types';
 
@@ -31,7 +31,9 @@ export default function ModelBuilderPage() {
   const { modelId } = useParams<{ modelId: string }>();
   const router = useRouter();
   const model = useAppStore((s) => s.models.find((m) => m.id === modelId));
-  const updateModelMeta = useAppStore((s) => s.updateModelMeta);
+  const modelLoad = useAppStore((s) => s.modelLoad);
+  const loadModel = useAppStore((s) => s.loadModel);
+  const saveModelMeta = useAppStore((s) => s.saveModelMeta);
   const addSection = useAppStore((s) => s.addSection);
   const removeSection = useAppStore((s) => s.removeSection);
   const updateSectionTitle = useAppStore((s) => s.updateSectionTitle);
@@ -47,7 +49,65 @@ export default function ModelBuilderPage() {
   const [publishSuccess, setPublishSuccess] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  if (!model) return <ErrorState title="Modelo não encontrado" message="Ele pode ter sido removido ou o link está incorreto." />;
+  // Título, categoria e descrição ficam em campos locais e são salvos na API ao sair do campo.
+  const [title, setTitle] = useState(model?.title ?? '');
+  const [category, setCategory] = useState(model?.category ?? '');
+  const [description, setDescription] = useState(model?.description ?? '');
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [metaNotice, setMetaNotice] = useState<string | null>(null);
+
+  // Carrega o modelo pela API (link direto/refresh). Modelos locais (dados de exemplo) não existem na API.
+  useEffect(() => {
+    const local = useAppStore.getState().models.find((m) => m.id === modelId);
+    if (!local || local.lockVersion !== undefined) void loadModel(modelId);
+  }, [modelId, loadModel]);
+
+  // Sincroniza os campos quando o modelo chega (ou é recarregado) da API.
+  useEffect(() => {
+    setTitle(model?.title ?? '');
+    setCategory(model?.category ?? '');
+    setDescription(model?.description ?? '');
+  }, [model?.title, model?.category, model?.description, model?.lockVersion]);
+
+  useEffect(() => {
+    if (!metaNotice) return;
+    const timer = setTimeout(() => setMetaNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [metaNotice]);
+
+  if (!model) {
+    const loadingThis = modelLoad.id !== modelId || modelLoad.status === 'idle' || modelLoad.status === 'loading';
+    if (loadingThis) return <LoadingState label="Carregando modelo..." />;
+    if (modelLoad.status === 'error') {
+      return (
+        <ErrorState
+          title="Não foi possível carregar o modelo"
+          message={modelLoad.error ?? 'Tente novamente.'}
+          onRetry={() => void loadModel(modelId)}
+        />
+      );
+    }
+    return <ErrorState title="Modelo não encontrado" message="Ele pode ter sido removido ou o link está incorreto." />;
+  }
+
+  // RN-018: só o rascunho pode ser alterado livremente.
+  const isDraft = model.status === 'RASCUNHO';
+
+  async function handleSaveMeta() {
+    const patch: { title?: string; category?: string; description?: string } = {};
+    if (title.trim() !== model!.title) patch.title = title;
+    if (category.trim() !== model!.category) patch.category = category;
+    if (description.trim() !== model!.description) patch.description = description;
+    if (Object.keys(patch).length === 0) return;
+    const result = await saveModelMeta(model!.id, patch);
+    if (!result.ok) {
+      setMetaNotice(null);
+      setMetaError(result.error);
+      return;
+    }
+    setMetaError(null);
+    setMetaNotice('Alterações salvas.');
+  }
 
   const totalItems = model.sections.reduce((sum, s) => sum + s.items.length, 0);
   const requiredItems = model.sections.reduce((sum, s) => sum + s.items.filter((it) => it.required).length, 0);
@@ -90,33 +150,56 @@ export default function ModelBuilderPage() {
           )}
 
           <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
-            <label className="text-xs font-bold text-navy-700 uppercase block mb-1">Título</label>
+            {!isDraft && (
+              <div className="bg-slate-50 border border-slate-200 text-slate-600 text-xs font-semibold rounded-xl px-4 py-3 mb-4">
+                Só modelos em rascunho podem ter título, categoria e descrição editados (RN-018).
+              </div>
+            )}
+            <label className="text-xs font-bold text-navy-700 uppercase block mb-1" htmlFor="model-title">Título</label>
             <input
-              value={model.title}
-              onChange={(e) => updateModelMeta(model.id, { title: e.target.value })}
-              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-lg font-bold text-navy-900 mb-4"
+              id="model-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleSaveMeta}
+              maxLength={160}
+              disabled={!isDraft}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-lg font-bold text-navy-900 mb-4 disabled:bg-slate-50 disabled:text-slate-500"
             />
             <div className="grid sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="text-xs font-bold text-navy-700 uppercase block mb-1">Categoria</label>
+                <label className="text-xs font-bold text-navy-700 uppercase block mb-1" htmlFor="model-category">Categoria</label>
                 <input
-                  value={model.category}
-                  onChange={(e) => updateModelMeta(model.id, { category: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                  id="model-category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  onBlur={handleSaveMeta}
+                  maxLength={100}
+                  disabled={!isDraft}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
                 />
               </div>
               <div>
                 <label className="text-xs font-bold text-navy-700 uppercase block mb-1">Versão atual</label>
-                <div className="border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-sm font-mono text-slate-500">v{model.version}</div>
+                <div className="border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-sm font-mono text-slate-500">
+                  {isDraft ? 'Rascunho' : `v${model.version}`}
+                </div>
               </div>
             </div>
-            <label className="text-xs font-bold text-navy-700 uppercase block mb-1">Descrição</label>
+            <label className="text-xs font-bold text-navy-700 uppercase block mb-1" htmlFor="model-description">Descrição</label>
             <textarea
-              value={model.description}
-              onChange={(e) => updateModelMeta(model.id, { description: e.target.value })}
+              id="model-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={handleSaveMeta}
+              maxLength={1000}
               rows={2}
-              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm"
+              disabled={!isDraft}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-500"
             />
+            {metaError && <div className="mt-3"><InlineError message={metaError} /></div>}
+            {metaNotice && (
+              <p role="status" className="text-xs text-emerald-700 font-semibold mt-3">{metaNotice}</p>
+            )}
           </div>
 
           {model.sections.length === 0 && (

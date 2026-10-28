@@ -16,7 +16,7 @@ export type InspectionStatus =
   | 'REPROVADA'
   | 'CANCELADA';
 
-export type ModelStatus = 'RASCUNHO' | 'PUBLICADO';
+export type ModelStatus = 'RASCUNHO' | 'PUBLICADO' | 'ARQUIVADO';
 
 export type ItemType =
   | 'TEXT_SHORT'
@@ -50,8 +50,13 @@ export interface InspectionModel {
   description: string;
   category: string;
   status: ModelStatus;
-  /** RN-020: alterações em um modelo publicado geram nova versão. */
+  /** RN-020: alterações em um modelo publicado geram nova versão (0 enquanto é rascunho). */
   version: number;
+  /**
+   * Versão de edição da API (trava otimista), diferente da `version` publicada.
+   * Ausente nos modelos locais (dados de exemplo), que não existem na API.
+   */
+  lockVersion?: number;
   sections: ModelSection[];
   updatedAt: string;
 }

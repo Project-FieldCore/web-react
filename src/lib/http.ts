@@ -64,6 +64,9 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   CLIENT_NOT_FOUND: 'Cliente não encontrado. Ele pode ter sido removido.',
   SITE_NAME_ALREADY_EXISTS: 'Já existe um local com esse nome para este cliente.',
   SITE_NOT_FOUND: 'Local não encontrado. Ele pode ter sido removido.',
+  TEMPLATE_TITLE_ALREADY_EXISTS: 'Já existe um modelo com esse título. Escolha outro título.',
+  TEMPLATE_NOT_EDITABLE: 'Só modelos em rascunho podem ser editados.',
+  INSPECTION_TEMPLATE_NOT_FOUND: 'Modelo não encontrado. Ele pode ter sido removido.',
   INVALID_SORT: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
   // 409 genérico (violação de integridade no banco, sem código específico).
   CONFLICT: 'Não foi possível salvar: os dados conflitam com um registro existente.',
