@@ -18,8 +18,9 @@ const section = (over: Partial<ModelSection> = {}): ModelSection => ({
   items: [item()],
   ...over,
 });
-const model = (over: { title?: string; sections?: ModelSection[] } = {}) => ({
+const model = (over: { title?: string; category?: string; sections?: ModelSection[] } = {}) => ({
   title: 'Inspeção de extintores',
+  category: 'Segurança',
   sections: [section()],
   ...over,
 });
@@ -33,6 +34,44 @@ describe('validateModel', () => {
 
   it('título vazio ou só com espaços impede publicar', () => {
     expect(errors(model({ title: '   ' }))).toEqual(['Informe um título para o modelo.']);
+  });
+
+  it('categoria vazia ou só com espaços impede publicar (RN-015)', () => {
+    expect(errors(model({ category: '' }))).toEqual(['Informe a categoria do modelo.']);
+    expect(errors(model({ category: '   ' }))).toEqual(['Informe a categoria do modelo.']);
+  });
+
+  it('modelo sem título e sem categoria (o caso do mock permissivo) acusa os dois', () => {
+    expect(errors(model({ title: '', category: '' }))).toEqual(['Informe um título para o modelo.', 'Informe a categoria do modelo.']);
+  });
+
+  it('problemas do modelo apontam o campo para corrigir', () => {
+    expect(validateModel(model({ title: '' }))[0]).toMatchObject({ field: 'title' });
+    expect(validateModel(model({ category: '' }))[0]).toMatchObject({ field: 'category' });
+    expect(validateModel(model({ sections: [] }))[0]).toMatchObject({ field: 'sections' });
+    expect(validateModel(model({ sections: [section({ items: [] })] }))[0]).toMatchObject({ field: 'sections' });
+  });
+
+  describe('limites da API', () => {
+    const long = (n: number) => 'x'.repeat(n);
+
+    it('título do modelo acima de 160 e categoria acima de 100', () => {
+      expect(errors(model({ title: long(160) }))).toEqual([]);
+      expect(errors(model({ title: long(161) }))).toEqual(['O título do modelo deve ter no máximo 160 caracteres.']);
+      expect(errors(model({ category: long(100) }))).toEqual([]);
+      expect(errors(model({ category: long(101) }))).toEqual(['A categoria deve ter no máximo 100 caracteres.']);
+    });
+
+    it('título de seção acima de 255 e de item acima de 500', () => {
+      expect(errors(model({ sections: [section({ title: long(255) })] }))).toEqual([]);
+      expect(errors(model({ sections: [section({ title: long(256) })] }))[0]).toContain('no máximo 255 caracteres');
+      expect(errors(model({ sections: [section({ items: [item({ title: long(500) })] })] }))).toEqual([]);
+      expect(errors(model({ sections: [section({ items: [item({ title: long(501) })] })] }))[0]).toContain('no máximo 500 caracteres');
+    });
+
+    it('a medida ignora espaços nas pontas', () => {
+      expect(errors(model({ title: `  ${long(160)}  ` }))).toEqual([]);
+    });
   });
 
   it('sem seções impede publicar (RN-015)', () => {

@@ -42,6 +42,7 @@ import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
 import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
@@ -151,6 +152,10 @@ interface AppState {
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
   updateItem: (modelId: string, sectionId: string, itemId: string, patch: Partial<ModelItem>) => void;
   publishModel: (modelId: string) => Promise<Result>;
+  /** RN-020: alterar um modelo publicado = começar uma nova versão (a publicada fica intacta). */
+  startNewModelVersion: (modelId: string) => void;
+  /** Descarta as alterações da nova versão e volta à publicada. */
+  discardNewModelVersion: (modelId: string) => void;
 
   // --- agendamento (UC-06) ---
   scheduleInspection: (input: {
@@ -719,7 +724,9 @@ export const useAppStore = create<AppState>()(
     saveModelMeta: async (modelId, patch) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
-      if (model.status !== 'RASCUNHO') return { ok: false, error: 'Só modelos em rascunho podem ser editados.' };
+      if (isLocked(model)) {
+        return { ok: false, error: 'A versão publicada é imutável. Crie uma nova versão para alterá-la (RN-019).' };
+      }
       const clean = {
         title: patch.title?.trim(),
         category: patch.category?.trim(),
@@ -730,8 +737,9 @@ export const useAppStore = create<AppState>()(
         requireCategory: patch.category !== undefined,
       });
       if (invalid) return { ok: false, error: invalid };
-      // Modelo local (dados de exemplo), que não existe na API: edita só na tela.
-      if (model.lockVersion === undefined) {
+      // Modelo local (dados de exemplo) ou nova versão de um modelo publicado: a API só aceita
+      // editar rascunhos (409 TEMPLATE_NOT_EDITABLE), então a edição fica só na tela.
+      if (model.lockVersion === undefined || model.status !== 'RASCUNHO') {
         get().updateModelMeta(modelId, clean);
         return { ok: true };
       }
@@ -754,6 +762,7 @@ export const useAppStore = create<AppState>()(
     saveModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
       try {
         replaceModel(await modelsApi.saveModel(model));
       } catch (error) {
@@ -765,14 +774,14 @@ export const useAppStore = create<AppState>()(
 
     updateModelMeta: (modelId, patch) => {
       set((s) => ({
-        models: s.models.map((m) => (m.id === modelId ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m)),
+        models: s.models.map((m) => (m.id === modelId && !isLocked(m) ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m)),
       }));
     },
 
     addSection: (modelId) => {
       set((s) => ({
         models: s.models.map((m) => {
-          if (m.id !== modelId) return m;
+          if (m.id !== modelId || isLocked(m)) return m;
           // A nova seção entra no fim, com a próxima ordem (RN-017).
           const section: ModelSection = {
             id: newId('sec'),
@@ -788,7 +797,7 @@ export const useAppStore = create<AppState>()(
     removeSection: (modelId, sectionId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? { ...m, sections: normalizeSectionOrder(m.sections.filter((sec) => sec.id !== sectionId)) }
             : m
         ),
@@ -798,7 +807,7 @@ export const useAppStore = create<AppState>()(
     moveSection: (modelId, sectionId, direction) => {
       set((s) => ({
         models: s.models.map((m) => {
-          if (m.id !== modelId) return m;
+          if (m.id !== modelId || isLocked(m)) return m;
           const sections = moveSectionInList(m.sections, sectionId, direction);
           // Primeira/última seção (ou id desconhecido): nada muda.
           return sections === m.sections ? m : { ...m, sections, updatedAt: new Date().toISOString() };
@@ -809,7 +818,7 @@ export const useAppStore = create<AppState>()(
     updateSectionTitle: (modelId, sectionId, title) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? { ...m, sections: m.sections.map((sec) => (sec.id === sectionId ? { ...sec, title } : sec)) }
             : m
         ),
@@ -827,7 +836,7 @@ export const useAppStore = create<AppState>()(
       };
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) => (sec.id === sectionId ? { ...sec, items: [...sec.items, item] } : sec)),
@@ -840,7 +849,7 @@ export const useAppStore = create<AppState>()(
     removeItem: (modelId, sectionId, itemId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) =>
@@ -855,7 +864,7 @@ export const useAppStore = create<AppState>()(
     updateItem: (modelId, sectionId, itemId, patch) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) =>
@@ -874,9 +883,17 @@ export const useAppStore = create<AppState>()(
     publishModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      // RN-019: a versão publicada não é publicada de novo; é preciso criar uma nova versão.
+      if (isLocked(model)) {
+        return { ok: false, error: 'Esta versão já está publicada e é imutável. Crie uma nova versão para alterá-la (RN-019).' };
+      }
       // Mesma validação da prévia e do botão Publicar (RN-015/016 + o que a API exige).
       const [blocking] = blockingIssues(validateModel(model));
       if (blocking) return { ok: false, error: blocking.message };
+      // RN-020: só gera nova versão se algo mudou desde a publicada.
+      if (!hasUnpublishedChanges(model)) {
+        return { ok: false, error: `Nenhuma alteração desde a versão v${model.version}. Altere o modelo antes de publicar.` };
+      }
 
       // A API recebe o rascunho completo e só então publica — quem decide a
       // nova versão (RN-020) é ela; usamos o que voltar.
@@ -887,9 +904,29 @@ export const useAppStore = create<AppState>()(
       } catch (error) {
         return toErrorResult(error, 'Não foi possível publicar o modelo. Tente novamente.');
       }
-      replaceModel(published);
+      // A API pode não devolver as seções: mantém as que foram validadas e enviadas.
+      replaceModel(
+        markPublished({
+          ...published,
+          sections: published.sections?.length ? published.sections : model.sections,
+        })
+      );
       pushAudit('PUBLICOU', 'Modelo de inspeção', modelId, `${published.title} · v${published.version}`);
       return { ok: true };
+    },
+
+    startNewModelVersion: (modelId) => {
+      set((s) => ({
+        models: s.models.map((m) => (m.id === modelId ? startNewVersion(m) : m)),
+      }));
+      pushAudit('INICIOU_NOVA_VERSAO', 'Modelo de inspeção', modelId);
+    },
+
+    discardNewModelVersion: (modelId) => {
+      set((s) => ({
+        models: s.models.map((m) => (m.id === modelId ? discardNewVersion(m) : m)),
+      }));
+      pushAudit('DESCARTOU_NOVA_VERSAO', 'Modelo de inspeção', modelId);
     },
 
     // RN-024/025/027: inspeção precisa de versão publicada, dados básicos e técnico ativo.

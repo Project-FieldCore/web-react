@@ -216,7 +216,7 @@ describe('useAppStore construtor de modelos — #134', () => {
 
       const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Outro' });
 
-      expect(result).toEqual({ ok: false, error: 'Só modelos em rascunho podem ser editados.' });
+      expect(result).toEqual({ ok: false, error: 'A versão publicada é imutável. Crie uma nova versão para alterá-la (RN-019).' });
       expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
     });
 
@@ -314,8 +314,15 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(modelsApi.publishModel).not.toHaveBeenCalled();
     });
 
+    /** Prepara uma nova versão do modelo publicado, com uma alteração real. */
+    function editPublishedModel() {
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+      useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Manutenção Preventiva (revisado)' });
+      return useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+    }
+
     it('salva e publica; a versão vem da API (RN-020)', async () => {
-      const current = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+      const current = editPublishedModel();
       mocked(modelsApi.saveModel).mockResolvedValue(current);
       mocked(modelsApi.publishModel).mockResolvedValue({ ...current, version: current.version + 1 });
 
@@ -324,17 +331,78 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(result).toEqual({ ok: true });
       expect(modelsApi.saveModel).toHaveBeenCalled();
       expect(modelsApi.publishModel).toHaveBeenCalledWith(PUBLISHED_ID);
-      expect(useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!.version).toBe(current.version + 1);
+      const published = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+      expect(published.version).toBe(current.version + 1);
+      // a nova versão vira a foto publicada e a edição termina
+      expect(published.editingNewVersion).toBe(false);
+      expect(published.publishedSnapshot?.title).toBe('Manutenção Preventiva (revisado)');
+    });
+
+    it('depois de publicar, o modelo volta a ficar imutável (RN-019)', async () => {
+      const current = editPublishedModel();
+      mocked(modelsApi.saveModel).mockResolvedValue(current);
+      mocked(modelsApi.publishModel).mockResolvedValue({ ...current, version: current.version + 1 });
+      await useAppStore.getState().publishModel(PUBLISHED_ID);
+
+      useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Tentativa de alterar a publicada' });
+      useAppStore.getState().addSection(PUBLISHED_ID);
+
+      const model = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+      expect(model.title).toBe('Manutenção Preventiva (revisado)');
+      expect(model.sections).toHaveLength(current.sections.length);
     });
 
     it('não publica se o salvamento falhar', async () => {
+      editPublishedModel();
       mocked(modelsApi.saveModel).mockRejectedValue(new ApiError('Título duplicado.', 422));
 
       const result = await useAppStore.getState().publishModel(PUBLISHED_ID);
 
       expect(result).toEqual({ ok: false, error: 'Título duplicado.' });
       expect(modelsApi.publishModel).not.toHaveBeenCalled();
-      expect(useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!.version).toBe(3);
+      const model = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
+      expect(model.version).toBe(3);
+      expect(model.editingNewVersion).toBe(true); // continua editando, nada se perdeu
+    });
+
+    it('versão publicada e imutável: publicar de novo é recusado sem chamar a API (RN-019)', async () => {
+      const result = await useAppStore.getState().publishModel(PUBLISHED_ID);
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'Esta versão já está publicada e é imutável. Crie uma nova versão para alterá-la (RN-019).',
+      });
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+      expect(modelsApi.publishModel).not.toHaveBeenCalled();
+    });
+
+    it('nova versão sem nenhuma alteração não é publicada (RN-020)', async () => {
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+
+      const result = await useAppStore.getState().publishModel(PUBLISHED_ID);
+
+      expect(result).toEqual({ ok: false, error: 'Nenhuma alteração desde a versão v3. Altere o modelo antes de publicar.' });
+      expect(modelsApi.publishModel).not.toHaveBeenCalled();
+    });
+
+    it('modelo sem título e sem categoria não é publicado (o mock permissivo)', async () => {
+      useAppStore.setState((s) => ({ models: s.models.map((m) => (m.id === DRAFT_ID ? { ...m, title: '', category: '' } : m)) }));
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: false, error: 'Informe um título para o modelo.' });
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+    });
+
+    it('rascunho nunca publicado publica mesmo sem "alterações" (não há versão anterior)', async () => {
+      const current = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!;
+      mocked(modelsApi.saveModel).mockResolvedValue(current);
+      mocked(modelsApi.publishModel).mockResolvedValue({ ...current, status: 'PUBLICADO', version: 1 });
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: true });
+      expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)).toMatchObject({ status: 'PUBLICADO', version: 1 });
     });
 
     it('deixa o status local intacto quando a publicação falha', async () => {
@@ -593,6 +661,104 @@ describe('useAppStore construtor de modelos — #134', () => {
       for (const model of published) {
         expect(blockingIssues(validateModel(model))).toEqual([]);
       }
+    });
+  });
+
+  describe('versão publicada imutável e nova versão (RN-019/020)', () => {
+    const get = (id: string) => useAppStore.getState().models.find((m) => m.id === id)!;
+    const snapshotOfPublished = () => structuredClone({ title: get(PUBLISHED_ID).title, sections: get(PUBLISHED_ID).sections });
+
+    it('modelo publicado fora de edição recusa toda alteração de conteúdo', () => {
+      const before = get(PUBLISHED_ID);
+      const sectionId = before.sections[0].id;
+      const itemId = before.sections[0].items[0].id;
+      const api = useAppStore.getState();
+
+      api.updateModelMeta(PUBLISHED_ID, { title: 'Alterado' });
+      api.addSection(PUBLISHED_ID);
+      api.removeSection(PUBLISHED_ID, sectionId);
+      api.moveSection(PUBLISHED_ID, sectionId, 'down');
+      api.updateSectionTitle(PUBLISHED_ID, sectionId, 'Alterada');
+      api.addItem(PUBLISHED_ID, sectionId);
+      api.removeItem(PUBLISHED_ID, sectionId, itemId);
+      api.updateItem(PUBLISHED_ID, sectionId, itemId, { title: 'Alterado', required: false });
+
+      expect(get(PUBLISHED_ID)).toBe(before);
+    });
+
+    it('saveModelMeta e saveModel também recusam o modelo publicado, sem chamar a API', async () => {
+      const meta = await useAppStore.getState().saveModelMeta(PUBLISHED_ID, { title: 'Outro' });
+      const save = await useAppStore.getState().saveModel(PUBLISHED_ID);
+
+      expect(meta).toEqual({ ok: false, error: 'A versão publicada é imutável. Crie uma nova versão para alterá-la (RN-019).' });
+      expect(save).toEqual({ ok: false, error: 'A versão publicada é imutável (RN-019).' });
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+    });
+
+    it('startNewModelVersion libera a edição e o modelo continua publicado e agendável', () => {
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+
+      const model = get(PUBLISHED_ID);
+      expect(model).toMatchObject({ status: 'PUBLICADO', version: 3, editingNewVersion: true });
+      expect(model.publishedSnapshot).toBeDefined();
+    });
+
+    it('com a nova versão aberta, as alterações valem na cópia de trabalho e não na publicada', () => {
+      const published = snapshotOfPublished();
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+
+      useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Nova versão do modelo' });
+      useAppStore.getState().addSection(PUBLISHED_ID);
+
+      const model = get(PUBLISHED_ID);
+      expect(model.title).toBe('Nova versão do modelo');
+      expect(model.sections).toHaveLength(published.sections.length + 1);
+      expect(model.publishedSnapshot?.title).toBe(published.title);
+      expect(model.publishedSnapshot?.sections).toHaveLength(published.sections.length);
+    });
+
+    it('startNewModelVersion não faz nada num rascunho', () => {
+      const before = get(DRAFT_ID);
+
+      useAppStore.getState().startNewModelVersion(DRAFT_ID);
+
+      expect(get(DRAFT_ID)).toBe(before);
+    });
+
+    it('discardNewModelVersion restaura a versão publicada e trava de novo', () => {
+      const published = snapshotOfPublished();
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+      useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Vai ser descartado' });
+      useAppStore.getState().addSection(PUBLISHED_ID);
+
+      useAppStore.getState().discardNewModelVersion(PUBLISHED_ID);
+
+      const model = get(PUBLISHED_ID);
+      expect(model.title).toBe(published.title);
+      expect(model.sections).toHaveLength(published.sections.length);
+      expect(model.editingNewVersion).toBe(false);
+      useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Depois do descarte' });
+      expect(get(PUBLISHED_ID).title).toBe(published.title);
+    });
+
+    it('saveModelMeta numa nova versão edita só na tela (a API só aceita rascunho)', async () => {
+      useAppStore.setState((s) => ({ models: s.models.map((m) => (m.id === PUBLISHED_ID ? { ...m, lockVersion: 7 } : m)) }));
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+
+      const result = await useAppStore.getState().saveModelMeta(PUBLISHED_ID, { title: 'Título da nova versão' });
+
+      expect(result).toEqual({ ok: true });
+      expect(get(PUBLISHED_ID).title).toBe('Título da nova versão');
+      expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
+    });
+
+    it('registra no histórico quando uma nova versão é iniciada e descartada', () => {
+      useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
+      useAppStore.getState().discardNewModelVersion(PUBLISHED_ID);
+
+      const actions = useAppStore.getState().auditEvents.slice(0, 2).map((e) => e.action);
+      expect(actions).toEqual(['DESCARTOU_NOVA_VERSAO', 'INICIOU_NOVA_VERSAO']);
     });
   });
 });

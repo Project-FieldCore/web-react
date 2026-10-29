@@ -49,6 +49,14 @@ export interface ModelSection {
   items: ModelItem[];
 }
 
+/** Conteúdo de uma versão do modelo (o que a publicação congela — RN-019). */
+export interface ModelSnapshot {
+  title: string;
+  description: string;
+  category: string;
+  sections: ModelSection[];
+}
+
 export interface InspectionModel {
   id: string;
   title: string;
@@ -64,6 +72,14 @@ export interface InspectionModel {
   lockVersion?: number;
   sections: ModelSection[];
   updatedAt: string;
+  /**
+   * Foto da versão publicada (RN-019: imutável). Nunca muda depois de publicada;
+   * as alterações são feitas na cópia de trabalho (os campos acima) e só viram
+   * a próxima versão ao publicar (RN-020).
+   */
+  publishedSnapshot?: ModelSnapshot;
+  /** Há uma nova versão sendo editada sobre a cópia de trabalho de um modelo publicado. */
+  editingNewVersion?: boolean;
 }
 
 /**
