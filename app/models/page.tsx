@@ -6,13 +6,16 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge, StatCard } from '@/components/Badges';
 import { EmptyState, InlineError } from '@/components/States';
+import { Field, Modal } from '@/components/Modal';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { ModelStatus } from '@/types';
+import type { NewModelInput } from '@/lib/models-api';
 
 const STATUS_FILTERS: { key: 'TODOS' | ModelStatus; label: string }[] = [
   { key: 'TODOS', label: 'Todos' },
   { key: 'PUBLICADO', label: 'Publicados' },
   { key: 'RASCUNHO', label: 'Rascunhos' },
+  { key: 'ARQUIVADO', label: 'Arquivados' },
 ];
 
 /**
@@ -22,7 +25,7 @@ export default function ModelsPage() {
   const models = useAppStore((s) => s.models);
   const createDraftModel = useAppStore((s) => s.createDraftModel);
   const router = useRouter();
-  const create = useAsyncAction();
+  const [showNew, setShowNew] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]['key']>('TODOS');
   const [categoryFilter, setCategoryFilter] = useState('TODAS');
@@ -30,7 +33,7 @@ export default function ModelsPage() {
 
   const categories = useMemo(() => Array.from(new Set(models.map((m) => m.category))).sort(), [models]);
   const publishedCount = models.filter((m) => m.status === 'PUBLICADO').length;
-  const draftCount = models.length - publishedCount;
+  const draftCount = models.filter((m) => m.status === 'RASCUNHO').length;
   const totalItems = models.reduce((sum, m) => sum + m.sections.reduce((s2, sec) => s2 + sec.items.length, 0), 0);
 
   const filtered = useMemo(() => {
@@ -42,11 +45,6 @@ export default function ModelsPage() {
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   }, [models, statusFilter, categoryFilter, search]);
 
-  async function handleNew() {
-    const result = await create.run(() => createDraftModel());
-    if (result.ok) router.push(`/models/${result.id}`);
-  }
-
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
@@ -55,15 +53,12 @@ export default function ModelsPage() {
           <p className="text-sm text-slate-500">Crie, organize e publique versões de checklist (UC-04, UC-05)</p>
         </div>
         <button
-          onClick={handleNew}
-          disabled={create.pending}
-          className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap disabled:opacity-60"
+          onClick={() => setShowNew(true)}
+          className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap"
         >
-          {create.pending ? 'Criando...' : '+ Novo modelo'}
+          + Novo modelo
         </button>
       </div>
-
-      {create.error && <div className="mb-4"><InlineError message={create.error} /></div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total de modelos" value={models.length} />
@@ -123,7 +118,8 @@ export default function ModelsPage() {
                 <p className="text-sm text-slate-500 mb-4 line-clamp-2">{m.description || 'Sem descrição.'}</p>
                 <div className="mt-auto flex items-center gap-2 flex-wrap">
                   <Tag>{m.category}</Tag>
-                  <Tag>v{m.version}</Tag>
+                  {m.status !== 'RASCUNHO' && <Tag>v{m.version}</Tag>}
+                  {m.editingNewVersion && <Tag>Nova versão em edição</Tag>}
                   <Tag>{m.sections.length} seç{m.sections.length === 1 ? 'ão' : 'ões'}</Tag>
                   <Tag>{itemCount} it{itemCount === 1 ? 'em' : 'ens'}</Tag>
                 </div>
@@ -135,7 +131,93 @@ export default function ModelsPage() {
           })}
         </div>
       )}
+
+      {showNew && (
+        <NewModelModal
+          categories={categories}
+          onClose={() => setShowNew(false)}
+          onCreate={async (input) => {
+            const result = await createDraftModel(input);
+            if (result.ok) router.push(`/models/${result.id}`);
+            return result;
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * RN-015: o modelo nasce em rascunho com título e categoria (descrição opcional).
+ * O título é único — a API devolve 409 se já existir outro igual.
+ */
+function NewModelModal({
+  categories,
+  onClose,
+  onCreate,
+}: {
+  categories: string[];
+  onClose: () => void;
+  onCreate: (input: NewModelInput) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+}) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('');
+  const [description, setDescription] = useState('');
+  const create = useAsyncAction();
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const result = await create.run(() => onCreate({ title, category, description }));
+    // Em caso de sucesso a tela navega para o construtor; o modal só fecha se continuar montado.
+    if (result.ok) onClose();
+  }
+
+  return (
+    <Modal title="Novo modelo de inspeção" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <Field label="Título" required>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={160}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+            required
+            autoFocus
+          />
+        </Field>
+        <Field label="Categoria" required>
+          <input
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            list="model-categories"
+            maxLength={100}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+            placeholder="Ex.: Segurança, Manutenção"
+            required
+          />
+          <datalist id="model-categories">
+            {categories.map((c) => <option key={c} value={c} />)}
+          </datalist>
+        </Field>
+        <Field label="Descrição (opcional)">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={1000}
+            rows={3}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </Field>
+        {create.error && <div className="mb-3"><InlineError message={create.error} /></div>}
+        <button
+          type="submit"
+          disabled={create.pending}
+          className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60"
+        >
+          {create.pending ? 'Criando...' : 'Criar rascunho'}
+        </button>
+      </form>
+    </Modal>
   );
 }
 

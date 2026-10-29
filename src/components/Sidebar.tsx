@@ -98,7 +98,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: '/users', label: 'Usuários', Icon: IconUsers, roles: ['ADMIN'] },
-  { href: '/clients', label: 'Clientes e locais', Icon: IconBuilding, roles: ['ADMIN'] },
+  { href: '/clients', label: 'Clientes e locais', Icon: IconBuilding, roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/equipment', label: 'Equipamentos', Icon: IconTag, roles: ['ADMIN'] },
   { href: '/audit', label: 'Auditoria', Icon: IconHistory, roles: ['ADMIN'] },
 ];
@@ -121,14 +121,15 @@ function Brand() {
 
 function NavLinks({ pathname, role, onNavigate }: { pathname: string; role: UserRole; onNavigate?: () => void }) {
   const items = [...NAV_ITEMS, ...ADMIN_NAV_ITEMS].filter((item) => item.roles.includes(role));
-  const showDivider = role === 'ADMIN';
+  // O título "Cadastros" vai acima do primeiro item dessa área que o perfil enxerga.
+  const firstAdminItem = items.find((item) => ADMIN_NAV_ITEMS.includes(item));
   const matches = (href: string) => href === pathname || (href !== '/' && pathname.startsWith(`${href}/`));
   const bestMatch = items.filter((item) => matches(item.href)).sort((a, b) => b.href.length - a.href.length)[0];
   return (
     <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
       {items.map((item) => {
         const active = item.href === bestMatch?.href;
-        const isFirstAdminItem = showDivider && item === ADMIN_NAV_ITEMS[0];
+        const isFirstAdminItem = item === firstAdminItem;
         return (
           <div key={item.href}>
             {isFirstAdminItem && (

@@ -39,6 +39,13 @@ import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
+import type { NewModelInput } from '@/lib/models-api';
+import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
+import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
+import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
+import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
+import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
@@ -63,13 +70,28 @@ interface AppState {
   resetPassword: (email: string, novaSenha: string) => Result;
 
   clients: Client[];
+  /** Carga da lista de clientes pela API (telas /clients e /schedule). */
+  clientsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  clientsError: string | null;
+  loadClients: () => Promise<void>;
   locations: Location[];
+  /** Carga da lista de locais pela API (telas de clientes, local e agenda). */
+  locationsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  locationsError: string | null;
+  loadLocations: () => Promise<void>;
   equipment: Equipment[];
   users: User[];
   /** Carga da lista de usuários pela API (tela /users). */
   usersStatus: 'idle' | 'loading' | 'ready' | 'error';
   usersError: string | null;
   loadUsers: () => Promise<void>;
+  /**
+   * As listagens paginadas buscam só uma página; estas ações levam os itens
+   * dela para o store (por id), para editar/mudar status usar o `version` mais recente.
+   */
+  mergeUsers: (items: User[]) => void;
+  mergeClients: (items: Client[]) => void;
+  mergeLocations: (items: Location[]) => void;
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
@@ -111,16 +133,31 @@ interface AppState {
   // --- modelos (UC-04, UC-05) — integrados à API (#134). As edições do
   // construtor (meta/seções/itens) mexem só no rascunho local; `saveModel`,
   // `publishModel` e `createDraftModel` é que falam com a API. ---
-  createDraftModel: () => Promise<ResultWithId>;
+  createDraftModel: (input: NewModelInput) => Promise<ResultWithId>;
+  /** Carrega um modelo pela API (link direto/refresh no construtor). */
+  loadModel: (modelId: string) => Promise<void>;
+  /** Estado da última carga por id (`loadModel`). */
+  modelLoad: { id: string | null; status: 'idle' | 'loading' | 'ready' | 'error' | 'not-found'; error: string | null };
+  /** Salva título/categoria/descrição do rascunho na API (RN-018: edição livre em rascunho). */
+  saveModelMeta: (
+    modelId: string,
+    patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>
+  ) => Promise<Result>;
   saveModel: (modelId: string) => Promise<Result>;
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
   addSection: (modelId: string) => void;
   removeSection: (modelId: string, sectionId: string) => void;
+  /** RN-017: sobe/desce a seção e renumera a ordem (0, 1, 2…, única na versão). */
+  moveSection: (modelId: string, sectionId: string, direction: MoveDirection) => void;
   updateSectionTitle: (modelId: string, sectionId: string, title: string) => void;
   addItem: (modelId: string, sectionId: string) => void;
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
   updateItem: (modelId: string, sectionId: string, itemId: string, patch: Partial<ModelItem>) => void;
   publishModel: (modelId: string) => Promise<Result>;
+  /** RN-020: alterar um modelo publicado = começar uma nova versão (a publicada fica intacta). */
+  startNewModelVersion: (modelId: string) => void;
+  /** Descarta as alterações da nova versão e volta à publicada. */
+  discardNewModelVersion: (modelId: string) => void;
 
   // --- agendamento (UC-06) ---
   scheduleInspection: (input: {
@@ -139,6 +176,11 @@ interface AppState {
   approveInspection: (inspectionId: string, comentario?: string) => Promise<Result>;
   rejectInspection: (inspectionId: string, motivo: string) => Promise<Result>;
   returnForCorrection: (inspectionId: string, comentario: string) => Promise<Result>;
+  /**
+   * Cancela com justificativa (RN-029); aprovada não cancela pelo fluxo comum (RN-030).
+   * Registra usuário, data e justificativa. Ainda só na tela: o backend não tem endpoint de cancelar.
+   */
+  cancelInspection: (inspectionId: string, justificativa: string) => Promise<Result>;
 
   // --- não conformidades — integradas à API (#135) ---
   resolveNonConformity: (inspectionId: string, itemId: string, status: NonConformityStatus) => Promise<Result>;
@@ -160,6 +202,36 @@ interface AppState {
 
 function newId(prefix: string) {
   return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Substitui (ou acrescenta) itens pelo id, mantendo a ordem dos que já existem. */
+function upsertById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const byId = new Map(incoming.map((item) => [item.id, item]));
+  const merged = current.map((item) => byId.get(item.id) ?? item);
+  const known = new Set(current.map((item) => item.id));
+  return [...merged, ...incoming.filter((item) => !known.has(item.id))];
+}
+
+/** Limites do modelo de inspeção na API (título 160, categoria 100, descrição 1000). */
+const MODEL_TITLE_MAX = 160;
+const MODEL_CATEGORY_MAX = 100;
+const MODEL_DESCRIPTION_MAX = 1000;
+
+/** Valida título/categoria/descrição do modelo; devolve a mensagem do 1º problema (ou null). */
+function validateModelMeta(
+  meta: { title?: string; category?: string; description?: string },
+  required: { requireTitle: boolean; requireCategory: boolean }
+): string | null {
+  if (required.requireTitle && !meta.title) return 'Informe o título do modelo.';
+  if (required.requireCategory && !meta.category) return 'Informe a categoria do modelo.';
+  if (meta.title && meta.title.length > MODEL_TITLE_MAX) return `O título deve ter no máximo ${MODEL_TITLE_MAX} caracteres.`;
+  if (meta.category && meta.category.length > MODEL_CATEGORY_MAX) {
+    return `A categoria deve ter no máximo ${MODEL_CATEGORY_MAX} caracteres.`;
+  }
+  if (meta.description && meta.description.length > MODEL_DESCRIPTION_MAX) {
+    return `A descrição deve ter no máximo ${MODEL_DESCRIPTION_MAX} caracteres.`;
+  }
+  return null;
 }
 
 /** Mínimo exigido pela API para a senha de um novo usuário. */
@@ -217,6 +289,20 @@ export const useAppStore = create<AppState>()(
     }
   }
 
+  // Mesma ideia para clientes (409 VERSION_CONFLICT).
+  async function reloadClientsOnVersionConflict(error: unknown) {
+    if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+      await get().loadClients();
+    }
+  }
+
+  // Mesma ideia para locais (409 VERSION_CONFLICT).
+  async function reloadLocationsOnVersionConflict(error: unknown) {
+    if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+      await get().loadLocations();
+    }
+  }
+
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
   // Integrado à API (#133) — ver src/lib/users-api.ts para o contrato assumido.
@@ -247,12 +333,17 @@ export const useAppStore = create<AppState>()(
   return {
     currentUser: null,
     clients: MOCK_CLIENTS,
+    clientsStatus: 'idle',
+    clientsError: null,
     locations: MOCK_LOCATIONS,
+    locationsStatus: 'idle',
+    locationsError: null,
     equipment: MOCK_EQUIPMENT,
     users: MOCK_USERS,
     usersStatus: 'idle',
     usersError: null,
     models: MOCK_MODELS,
+    modelLoad: { id: null, status: 'idle', error: null },
     inspections: MOCK_INSPECTIONS,
     auditEvents: MOCK_AUDIT_EVENTS,
     accessRequests: MOCK_ACCESS_REQUESTS,
@@ -348,10 +439,17 @@ export const useAppStore = create<AppState>()(
     },
     updateClient: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do cliente.' };
+      const version = get().clients.find((c) => c.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de clientes e tente de novo.' };
       let client: Client;
       try {
-        client = await clientsApi.updateClient(id, patch);
+        client = await clientsApi.updateClient(
+          id,
+          { nome: patch.nome?.trim(), cnpj: patch.cnpj?.trim() },
+          version
+        );
       } catch (error) {
+        await reloadClientsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
       }
       set((s) => ({ clients: s.clients.map((c) => (c.id === id ? client : c)) }));
@@ -359,10 +457,13 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
     setClientActive: async (id, ativo) => {
+      const version = get().clients.find((c) => c.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de clientes e tente de novo.' };
       let client: Client;
       try {
-        client = await clientsApi.setClientActive(id, ativo);
+        client = await clientsApi.setClientActive(id, ativo, version);
       } catch (error) {
+        await reloadClientsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível alterar o status do cliente. Tente novamente.');
       }
       set((s) => ({ clients: s.clients.map((c) => (c.id === id ? client : c)) }));
@@ -370,8 +471,7 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
-    // Integrado à API (#133) — ver src/lib/locations-api.ts (nome assumido
-    // como "site" no backend; ajustar se divergir do contrato real).
+    // Local = "site" na API; sempre criado sob um cliente (RN-009).
     createLocation: async (clienteId, nome, endereco) => {
       const client = get().clients.find((c) => c.id === clienteId);
       if (!client) return { ok: false, error: 'Cliente não encontrado (RN-009).' };
@@ -388,10 +488,17 @@ export const useAppStore = create<AppState>()(
     },
     updateLocation: async (id, patch) => {
       if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do local.' };
+      const version = get().locations.find((l) => l.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de locais e tente de novo.' };
       let location: Location;
       try {
-        location = await locationsApi.updateLocation(id, patch);
+        location = await locationsApi.updateLocation(
+          id,
+          { nome: patch.nome?.trim(), endereco: patch.endereco?.trim() },
+          version
+        );
       } catch (error) {
+        await reloadLocationsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
       }
       set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
@@ -399,10 +506,13 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
     setLocationActive: async (id, ativo) => {
+      const version = get().locations.find((l) => l.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de locais e tente de novo.' };
       let location: Location;
       try {
-        location = await locationsApi.setLocationActive(id, ativo);
+        location = await locationsApi.setLocationActive(id, ativo, version);
       } catch (error) {
+        await reloadLocationsOnVersionConflict(error);
         return toErrorResult(error, 'Não foi possível alterar o status do local. Tente novamente.');
       }
       set((s) => ({ locations: s.locations.map((l) => (l.id === id ? location : l)) }));
@@ -440,6 +550,36 @@ export const useAppStore = create<AppState>()(
     setEquipmentActive: (id, ativo) => {
       set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? { ...e, ativo } : e)) }));
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Equipamento', id);
+    },
+
+    // Substitui a lista pelo cadastro real da API. Até a carga terminar a tela
+    // mostra loading — nunca os dados de exemplo.
+    loadClients: async () => {
+      // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
+      if (get().clientsStatus !== 'ready') set({ clientsStatus: 'loading', clientsError: null });
+      try {
+        const clients = await clientsApi.listClients();
+        set({ clients, clientsStatus: 'ready', clientsError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os clientes. Tente novamente.');
+        set({ clientsStatus: 'error', clientsError: message });
+      }
+    },
+
+    mergeUsers: (items) => set((s) => ({ users: upsertById(s.users, items) })),
+    mergeClients: (items) => set((s) => ({ clients: upsertById(s.clients, items) })),
+    mergeLocations: (items) => set((s) => ({ locations: upsertById(s.locations, items) })),
+
+    loadLocations: async () => {
+      // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
+      if (get().locationsStatus !== 'ready') set({ locationsStatus: 'loading', locationsError: null });
+      try {
+        const locations = await locationsApi.listLocations();
+        set({ locations, locationsStatus: 'ready', locationsError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os locais. Tente novamente.');
+        set({ locationsStatus: 'error', locationsError: message });
+      }
     },
 
     // Substitui a lista pelo cadastro real da API (somente ADMIN). Até a carga
@@ -545,10 +685,16 @@ export const useAppStore = create<AppState>()(
       pushAudit('REJEITOU_ACESSO', 'Pedido de acesso', requestId);
     },
 
-    createDraftModel: async () => {
+    // RN-015: título e categoria obrigatórios. O título é único na API (409 se repetir).
+    createDraftModel: async (input) => {
+      const title = input.title.trim();
+      const category = input.category.trim();
+      const description = input.description?.trim() ?? '';
+      const invalid = validateModelMeta({ title, category, description }, { requireTitle: true, requireCategory: true });
+      if (invalid) return { ok: false, error: invalid };
       let draft: InspectionModel;
       try {
-        draft = await modelsApi.createModel({ title: 'Novo modelo de inspeção', description: '', category: 'Geral' });
+        draft = await modelsApi.createModel({ title, category, description: description || undefined });
       } catch (error) {
         return toErrorResult(error, 'Não foi possível criar o modelo. Tente novamente.');
       }
@@ -557,9 +703,73 @@ export const useAppStore = create<AppState>()(
       return { ok: true, id: draft.id };
     },
 
+    loadModel: async (modelId) => {
+      set({ modelLoad: { id: modelId, status: 'loading', error: null } });
+      let loaded: InspectionModel;
+      try {
+        loaded = await modelsApi.getModel(modelId);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          set({ modelLoad: { id: modelId, status: 'not-found', error: error.message } });
+          return;
+        }
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar o modelo. Tente novamente.');
+        set({ modelLoad: { id: modelId, status: 'error', error: message } });
+        return;
+      }
+      set((s) => {
+        const existing = s.models.find((m) => m.id === modelId);
+        // A API ainda não devolve seções: mantém as que já estão na tela.
+        const model = existing ? { ...loaded, sections: existing.sections } : loaded;
+        return {
+          models: existing ? s.models.map((m) => (m.id === modelId ? model : m)) : [model, ...s.models],
+          modelLoad: { id: modelId, status: 'ready', error: null },
+        };
+      });
+    },
+
+    saveModelMeta: async (modelId, patch) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) {
+        return { ok: false, error: 'A versão publicada é imutável. Crie uma nova versão para alterá-la (RN-019).' };
+      }
+      const clean = {
+        title: patch.title?.trim(),
+        category: patch.category?.trim(),
+        description: patch.description?.trim(),
+      };
+      const invalid = validateModelMeta(clean, {
+        requireTitle: patch.title !== undefined,
+        requireCategory: patch.category !== undefined,
+      });
+      if (invalid) return { ok: false, error: invalid };
+      // Modelo local (dados de exemplo) ou nova versão de um modelo publicado: a API só aceita
+      // editar rascunhos (409 TEMPLATE_NOT_EDITABLE), então a edição fica só na tela.
+      if (model.lockVersion === undefined || model.status !== 'RASCUNHO') {
+        get().updateModelMeta(modelId, clean);
+        return { ok: true };
+      }
+      let updated: InspectionModel;
+      try {
+        updated = await modelsApi.updateModelMeta(modelId, clean, model.lockVersion);
+      } catch (error) {
+        // Conflito de versão ou modelo que deixou de ser rascunho: recarrega o estado atual.
+        if (error instanceof ApiError && (error.code === 'VERSION_CONFLICT' || error.code === 'TEMPLATE_NOT_EDITABLE')) {
+          await get().loadModel(modelId);
+        }
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      // A API ainda não devolve seções: mantém as da tela.
+      set((s) => ({ models: s.models.map((m) => (m.id === modelId ? { ...updated, sections: m.sections } : m)) }));
+      pushAudit('ATUALIZOU', 'Modelo de inspeção', modelId, updated.title);
+      return { ok: true };
+    },
+
     saveModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
       try {
         replaceModel(await modelsApi.saveModel(model));
       } catch (error) {
@@ -571,29 +781,51 @@ export const useAppStore = create<AppState>()(
 
     updateModelMeta: (modelId, patch) => {
       set((s) => ({
-        models: s.models.map((m) => (m.id === modelId ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m)),
+        models: s.models.map((m) => (m.id === modelId && !isLocked(m) ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m)),
       }));
     },
 
     addSection: (modelId) => {
-      const section: ModelSection = { id: newId('sec'), title: 'Nova seção', items: [] };
       set((s) => ({
-        models: s.models.map((m) => (m.id === modelId ? { ...m, sections: [...m.sections, section] } : m)),
+        models: s.models.map((m) => {
+          if (m.id !== modelId || isLocked(m)) return m;
+          // A nova seção entra no fim, com a próxima ordem (RN-017).
+          const section: ModelSection = {
+            id: newId('sec'),
+            title: 'Nova seção',
+            displayOrder: nextDisplayOrder(m.sections),
+            items: [],
+          };
+          return { ...m, sections: [...m.sections, section] };
+        }),
       }));
     },
 
     removeSection: (modelId, sectionId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId ? { ...m, sections: m.sections.filter((sec) => sec.id !== sectionId) } : m
+          m.id === modelId && !isLocked(m)
+            ? { ...m, sections: normalizeSectionOrder(m.sections.filter((sec) => sec.id !== sectionId)) }
+            : m
         ),
+      }));
+    },
+
+    moveSection: (modelId, sectionId, direction) => {
+      set((s) => ({
+        models: s.models.map((m) => {
+          if (m.id !== modelId || isLocked(m)) return m;
+          const sections = moveSectionInList(m.sections, sectionId, direction);
+          // Primeira/última seção (ou id desconhecido): nada muda.
+          return sections === m.sections ? m : { ...m, sections, updatedAt: new Date().toISOString() };
+        }),
       }));
     },
 
     updateSectionTitle: (modelId, sectionId, title) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? { ...m, sections: m.sections.map((sec) => (sec.id === sectionId ? { ...sec, title } : sec)) }
             : m
         ),
@@ -606,11 +838,12 @@ export const useAppStore = create<AppState>()(
         title: 'Novo item',
         type: 'CONFORMITY',
         required: false,
-        needsEvidenceOnNok: false,
+        evidenceRequiredOnFailure: false,
+        observationRequiredOnFailure: false,
       };
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) => (sec.id === sectionId ? { ...sec, items: [...sec.items, item] } : sec)),
@@ -623,7 +856,7 @@ export const useAppStore = create<AppState>()(
     removeItem: (modelId, sectionId, itemId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) =>
@@ -638,12 +871,12 @@ export const useAppStore = create<AppState>()(
     updateItem: (modelId, sectionId, itemId, patch) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId
+          m.id === modelId && !isLocked(m)
             ? {
                 ...m,
                 sections: m.sections.map((sec) =>
                   sec.id === sectionId
-                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }
+                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? applyItemPatch(it, patch) : it)) }
                     : sec
                 ),
               }
@@ -657,12 +890,17 @@ export const useAppStore = create<AppState>()(
     publishModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
-      if (!model.title.trim()) return { ok: false, error: 'Informe um título para o modelo.' };
-      if (model.sections.length === 0) return { ok: false, error: 'Adicione ao menos uma seção com itens (RN-015).' };
-      const hasItem = model.sections.some((sec) => sec.items.length > 0);
-      if (!hasItem) return { ok: false, error: 'Adicione ao menos um item válido antes de publicar (RN-015).' };
-      const missingType = model.sections.some((sec) => sec.items.some((it) => !it.type));
-      if (missingType) return { ok: false, error: 'Todo item precisa de um tipo de resposta (RN-016).' };
+      // RN-019: a versão publicada não é publicada de novo; é preciso criar uma nova versão.
+      if (isLocked(model)) {
+        return { ok: false, error: 'Esta versão já está publicada e é imutável. Crie uma nova versão para alterá-la (RN-019).' };
+      }
+      // Mesma validação da prévia e do botão Publicar (RN-015/016 + o que a API exige).
+      const [blocking] = blockingIssues(validateModel(model));
+      if (blocking) return { ok: false, error: blocking.message };
+      // RN-020: só gera nova versão se algo mudou desde a publicada.
+      if (!hasUnpublishedChanges(model)) {
+        return { ok: false, error: `Nenhuma alteração desde a versão v${model.version}. Altere o modelo antes de publicar.` };
+      }
 
       // A API recebe o rascunho completo e só então publica — quem decide a
       // nova versão (RN-020) é ela; usamos o que voltar.
@@ -673,9 +911,29 @@ export const useAppStore = create<AppState>()(
       } catch (error) {
         return toErrorResult(error, 'Não foi possível publicar o modelo. Tente novamente.');
       }
-      replaceModel(published);
+      // A API pode não devolver as seções: mantém as que foram validadas e enviadas.
+      replaceModel(
+        markPublished({
+          ...published,
+          sections: published.sections?.length ? published.sections : model.sections,
+        })
+      );
       pushAudit('PUBLICOU', 'Modelo de inspeção', modelId, `${published.title} · v${published.version}`);
       return { ok: true };
+    },
+
+    startNewModelVersion: (modelId) => {
+      set((s) => ({
+        models: s.models.map((m) => (m.id === modelId ? startNewVersion(m) : m)),
+      }));
+      pushAudit('INICIOU_NOVA_VERSAO', 'Modelo de inspeção', modelId);
+    },
+
+    discardNewModelVersion: (modelId) => {
+      set((s) => ({
+        models: s.models.map((m) => (m.id === modelId ? discardNewVersion(m) : m)),
+      }));
+      pushAudit('DESCARTOU_NOVA_VERSAO', 'Modelo de inspeção', modelId);
     },
 
     // RN-024/025/027: inspeção precisa de versão publicada, dados básicos e técnico ativo.
@@ -688,19 +946,55 @@ export const useAppStore = create<AppState>()(
       if (!tech || tech.status !== 'ATIVO') {
         return { ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' };
       }
-      if (!input.clienteId || !input.localId || !input.dataPrevista) {
-        return { ok: false, error: 'Cliente, local e data prevista são obrigatórios (RN-025).' };
+      // RN-025 + o que a API exige: data futura e orientações até 2000 caracteres.
+      const invalid = validateSchedule(input);
+      if (invalid) return { ok: false, error: invalid };
+      // Cliente inativo fica fora de novos agendamentos (a API também valida).
+      const client = get().clients.find((c) => c.id === input.clienteId);
+      if (client && !client.ativo) {
+        return { ok: false, error: 'Cliente inativo não pode receber novos agendamentos.' };
+      }
+      const location = get().locations.find((l) => l.id === input.localId);
+      if (location && !location.ativo) {
+        return { ok: false, error: 'Local inativo não pode receber novos agendamentos.' };
       }
 
       let inspection: Inspection;
-      try {
-        inspection = await inspectionsApi.scheduleInspection(input);
-      } catch (error) {
-        return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+      if (isLocalOnlySchedule(model)) {
+        // O modelo ainda não tem o id da versão publicada na API (que o agendamento exige):
+        // a inspeção nasce ATRIBUÍDA só na tela, sem chamar a API.
+        inspection = buildLocalInspection(input, model, newId('INS'));
+      } else {
+        try {
+          inspection = await inspectionsApi.scheduleInspection(input, model.templateVersionId!, model.version);
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+        }
       }
       set((s) => ({ inspections: [inspection, ...s.inspections] }));
       pushAudit('AGENDOU', 'Inspeção', inspection.id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);
       return { ok: true, id: inspection.id };
+    },
+
+    cancelInspection: async (inspectionId, justificativa) => {
+      const inspection = get().inspections.find((i) => i.id === inspectionId);
+      if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
+      const blocked = cancelBlockedReason(inspection.status);
+      if (blocked) return { ok: false, error: blocked };
+      const invalid = validateJustification(justificativa);
+      if (invalid) return { ok: false, error: invalid };
+      const user = get().currentUser;
+      if (!user) return { ok: false, error: 'Sua sessão expirou. Entre novamente para cancelar a inspeção.' };
+
+      // Quando o backend tiver o endpoint de cancelar, a chamada entra aqui (antes de gravar na tela).
+      const cancelamento = buildCancellation({ id: user.id, nome: user.nome }, justificativa);
+      set((s) => ({
+        inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, status: 'CANCELADA', cancelamento } : i)),
+        // Nada mais a sincronizar de uma inspeção cancelada.
+        syncQueue: s.syncQueue.filter((q) => q.inspectionId !== inspectionId),
+      }));
+      pushAudit('CANCELOU', 'Inspeção', inspectionId, cancelamento.justificativa);
+      return { ok: true };
     },
 
     // Revisão (UC-16/UC-17): a API devolve a inspeção atualizada (status, review,
@@ -794,7 +1088,8 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    // RN-039/040: todo item obrigatório precisa de resposta; não conformidade crítica exige evidência.
+    // RN-039/040: todo item obrigatório precisa de resposta; não conformidade crítica exige evidência
+    // e, quando o item pede, observação (PBI-0021.1).
     submitInspection: async (inspectionId) => {
       const inspection = get().inspections.find((i) => i.id === inspectionId);
       if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
@@ -807,11 +1102,12 @@ export const useAppStore = create<AppState>()(
           if (item.required && !isAnswerFilled(answer)) {
             return { ok: false, error: `Responda o item obrigatório "${item.title}" antes de enviar.` };
           }
-          if (item.needsEvidenceOnNok && answer?.conformity === 'NAO_CONFORME') {
-            const nc = inspection.nonConformities[item.id];
-            if (!nc || nc.evidenceCount === 0) {
-              return { ok: false, error: `O item "${item.title}" é crítico e exige evidência para a não conformidade registrada (RN-039).` };
-            }
+          // Regras "na falha" (PBI-0021.1): observação e evidência obrigatórias quando não conforme.
+          if (missingObservation(item, answer)) {
+            return { ok: false, error: `O item "${item.title}" exige uma observação quando não conforme. Preencha antes de enviar.` };
+          }
+          if (answer?.conformity === 'NAO_CONFORME' && missingEvidence(item, inspection.nonConformities[item.id]?.evidenceCount)) {
+            return { ok: false, error: `O item "${item.title}" é crítico e exige evidência para a não conformidade registrada (RN-039).` };
           }
         }
       }

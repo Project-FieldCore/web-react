@@ -1,15 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import type { Client, Location, User } from '@/types';
 import { CONTRACT_IDS } from '@/data/contract-mocks';
 
 vi.mock('@/lib/clients-api', () => ({
+  listClients: vi.fn(),
   createClient: vi.fn(),
   updateClient: vi.fn(),
   setClientActive: vi.fn(),
 }));
 vi.mock('@/lib/locations-api', () => ({
+  listLocations: vi.fn(),
   createLocation: vi.fn(),
   updateLocation: vi.fn(),
   setLocationActive: vi.fn(),
@@ -29,7 +31,12 @@ function mocked<T extends (...args: never[]) => unknown>(fn: T) {
   return fn as unknown as ReturnType<typeof vi.fn>;
 }
 
+/** ID do cliente seed do mock OpenAPI (store inicial). */
 const EXISTING_CLIENT_ID = CONTRACT_IDS.client;
+
+const initialUsersForMerge = useAppStore.getState().users;
+const initialClientsForMerge = useAppStore.getState().clients;
+const initialLocationsForMerge = useAppStore.getState().locations;
 
 describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
   beforeEach(() => {
@@ -37,6 +44,12 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
   });
 
   describe('clients', () => {
+    // Os testes de carga/edição trocam a lista de clientes — restaura para os demais.
+    const initialClients = useAppStore.getState().clients;
+    afterEach(() => {
+      useAppStore.setState({ clients: initialClients, clientsStatus: 'idle', clientsError: null });
+    });
+
     it('createClient chama a API e guarda a entidade retornada', async () => {
       const client: Client = { id: 'cli-9', nome: 'Novo Cliente', ativo: true };
       mocked(clientsApi.createClient).mockResolvedValue(client);
@@ -70,28 +83,143 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
     });
 
-    it('setClientActive atualiza o cliente com a resposta da API', async () => {
-      const updated: Client = { id: EXISTING_CLIENT_ID, nome: 'Industria ABC', ativo: false };
-      mocked(clientsApi.setClientActive).mockResolvedValue(updated);
+    it('createClient propaga CNPJ duplicado (409) da API', async () => {
+      mocked(clientsApi.createClient).mockRejectedValue(
+        new ApiError('Já existe um cliente com esse CNPJ.', 409, undefined, 'DOCUMENT_ALREADY_EXISTS')
+      );
 
-      const result = await useAppStore.getState().setClientActive(EXISTING_CLIENT_ID, false);
+      const result = await useAppStore.getState().createClient('Cliente X', '12.345.678/0001-90');
 
-      expect(result).toEqual({ ok: true });
-      expect(useAppStore.getState().clients.find((c) => c.id === EXISTING_CLIENT_ID)).toEqual(updated);
+      expect(result).toEqual({ ok: false, error: 'Já existe um cliente com esse CNPJ.' });
     });
 
-    it('setClientActive repassa o erro da API sem alterar o estado local', async () => {
-      mocked(clientsApi.setClientActive).mockRejectedValue(new ApiError('Não autorizado.', 403));
-      const before = useAppStore.getState().clients.find((c) => c.id === EXISTING_CLIENT_ID);
+    describe('com clientes carregados da API (com version)', () => {
+      const loaded: Client = { id: 'cli-1', nome: 'Acme', cnpj: '11.111.111/0001-11', ativo: true, version: 3 };
 
-      const result = await useAppStore.getState().setClientActive(EXISTING_CLIENT_ID, false);
+      beforeEach(() => {
+        useAppStore.setState({ clients: [loaded], clientsStatus: 'ready', clientsError: null });
+      });
 
-      expect(result).toEqual({ ok: false, error: 'Não autorizado.' });
-      expect(useAppStore.getState().clients.find((c) => c.id === EXISTING_CLIENT_ID)).toEqual(before);
+      it('setClientActive envia o version e guarda o cliente retornado (com o version novo)', async () => {
+        const updated: Client = { ...loaded, ativo: false, version: 4 };
+        mocked(clientsApi.setClientActive).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().setClientActive('cli-1', false);
+
+        expect(result).toEqual({ ok: true });
+        expect(clientsApi.setClientActive).toHaveBeenCalledWith('cli-1', false, 3);
+        expect(useAppStore.getState().clients).toEqual([updated]);
+      });
+
+      it('setClientActive repassa o erro da API sem alterar o estado local', async () => {
+        mocked(clientsApi.setClientActive).mockRejectedValue(new ApiError('Não autorizado.', 403));
+
+        const result = await useAppStore.getState().setClientActive('cli-1', false);
+
+        expect(result).toEqual({ ok: false, error: 'Não autorizado.' });
+        expect(useAppStore.getState().clients).toEqual([loaded]);
+      });
+
+      it('updateClient envia o version e só os campos alterados, e atualiza a lista', async () => {
+        const updated: Client = { ...loaded, nome: 'Acme Ltda', version: 4 };
+        mocked(clientsApi.updateClient).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().updateClient('cli-1', { nome: 'Acme Ltda' });
+
+        expect(result).toEqual({ ok: true });
+        expect(clientsApi.updateClient).toHaveBeenCalledWith('cli-1', { nome: 'Acme Ltda', cnpj: undefined }, 3);
+        expect(useAppStore.getState().clients).toEqual([updated]);
+      });
+
+      it('updateClient não chama a API com nome vazio', async () => {
+        const result = await useAppStore.getState().updateClient('cli-1', { nome: '  ' });
+
+        expect(result).toEqual({ ok: false, error: 'Informe o nome do cliente.' });
+        expect(clientsApi.updateClient).not.toHaveBeenCalled();
+      });
+
+      it('VERSION_CONFLICT recarrega a lista (sem piscar loading) e devolve a mensagem', async () => {
+        const fresh: Client = { ...loaded, nome: 'Acme (outra pessoa editou)', version: 5 };
+        mocked(clientsApi.updateClient).mockRejectedValue(
+          new ApiError('Este registro foi alterado por outra pessoa.', 409, undefined, 'VERSION_CONFLICT')
+        );
+        mocked(clientsApi.listClients).mockResolvedValue([fresh]);
+        const statuses: string[] = [];
+        const unsubscribe = useAppStore.subscribe((st) => statuses.push(st.clientsStatus));
+
+        const result = await useAppStore.getState().updateClient('cli-1', { nome: 'Acme Ltda' });
+        unsubscribe();
+
+        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(useAppStore.getState().clients).toEqual([fresh]);
+        expect(statuses).not.toContain('loading');
+      });
+
+      it('sem version conhecido, não chama a API e pede para recarregar', async () => {
+        useAppStore.setState({ clients: [{ ...loaded, version: undefined }] });
+
+        const result = await useAppStore.getState().setClientActive('cli-1', false);
+
+        expect(result).toEqual({ ok: false, error: 'Recarregue a lista de clientes e tente de novo.' });
+        expect(clientsApi.setClientActive).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('loadClients', () => {
+      it('carrega a lista da API e marca como pronta', async () => {
+        const list: Client[] = [{ id: 'cli-1', nome: 'Acme', ativo: true, version: 0 }];
+        mocked(clientsApi.listClients).mockResolvedValue(list);
+        useAppStore.setState({ clientsStatus: 'idle' });
+
+        const promise = useAppStore.getState().loadClients();
+        expect(useAppStore.getState().clientsStatus).toBe('loading');
+        await promise;
+
+        expect(useAppStore.getState().clients).toEqual(list);
+        expect(useAppStore.getState().clientsStatus).toBe('ready');
+        expect(useAppStore.getState().clientsError).toBeNull();
+      });
+
+      it('lista vazia é um resultado válido (estado vazio, não erro)', async () => {
+        mocked(clientsApi.listClients).mockResolvedValue([]);
+
+        await useAppStore.getState().loadClients();
+
+        expect(useAppStore.getState().clients).toEqual([]);
+        expect(useAppStore.getState().clientsStatus).toBe('ready');
+      });
+
+      it('falha da API vira estado de erro com a mensagem, sem trocar a lista', async () => {
+        const before = useAppStore.getState().clients;
+        useAppStore.setState({ clientsStatus: 'idle' });
+        mocked(clientsApi.listClients).mockRejectedValue(new ApiError('Você não tem permissão para realizar esta ação.', 403));
+
+        await useAppStore.getState().loadClients();
+
+        expect(useAppStore.getState().clientsStatus).toBe('error');
+        expect(useAppStore.getState().clientsError).toBe('Você não tem permissão para realizar esta ação.');
+        expect(useAppStore.getState().clients).toBe(before);
+      });
+
+      it('erro de rede vira estado de erro', async () => {
+        useAppStore.setState({ clientsStatus: 'idle' });
+        mocked(clientsApi.listClients).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+        await useAppStore.getState().loadClients();
+
+        expect(useAppStore.getState().clientsStatus).toBe('error');
+        expect(useAppStore.getState().clientsError).toBe('Sem conexão.');
+      });
     });
   });
 
   describe('locations', () => {
+    // Os testes de carga/edição trocam a lista de locais — restaura para os demais.
+    const initialLocations = useAppStore.getState().locations;
+    afterEach(() => {
+      useAppStore.setState({ locations: initialLocations, locationsStatus: 'idle', locationsError: null });
+    });
+
     it('createLocation não chama a API quando o cliente não existe (RN-009)', async () => {
       const result = await useAppStore.getState().createLocation('cli-inexistente', 'Depósito');
 
@@ -99,22 +227,151 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       expect(locationsApi.createLocation).not.toHaveBeenCalled();
     });
 
-    it('createLocation chama a API (contra /sites) e guarda a entidade retornada', async () => {
-      const location: Location = { id: 'loc-9', clienteId: EXISTING_CLIENT_ID, nome: 'Depósito', ativo: true };
+    it('createLocation não chama a API com nome vazio', async () => {
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, '  ');
+
+      expect(result).toEqual({ ok: false, error: 'Informe o nome do local.' });
+      expect(locationsApi.createLocation).not.toHaveBeenCalled();
+    });
+
+    it('createLocation chama a API (sob o cliente) e guarda a entidade retornada', async () => {
+      const location: Location = { id: 'loc-9', clienteId: EXISTING_CLIENT_ID, nome: 'Depósito', ativo: true, version: 0 };
       mocked(locationsApi.createLocation).mockResolvedValue(location);
 
-      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito');
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito', 'Rua A, 10');
 
       expect(result).toEqual({ ok: true, id: 'loc-9' });
+      expect(locationsApi.createLocation).toHaveBeenCalledWith(EXISTING_CLIENT_ID, 'Depósito', 'Rua A, 10');
       expect(useAppStore.getState().locations).toContainEqual(location);
     });
 
-    it('updateLocation propaga erro de rede', async () => {
-      mocked(locationsApi.updateLocation).mockRejectedValue(new NetworkError('Sem conexão.'));
+    it('createLocation propaga nome duplicado no cliente (409) da API', async () => {
+      mocked(locationsApi.createLocation).mockRejectedValue(
+        new ApiError('Já existe um local com esse nome para este cliente.', 409, undefined, 'SITE_NAME_ALREADY_EXISTS')
+      );
 
-      const result = await useAppStore.getState().updateLocation(CONTRACT_IDS.site, { nome: 'Novo nome' });
+      const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito');
 
-      expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
+      expect(result).toEqual({ ok: false, error: 'Já existe um local com esse nome para este cliente.' });
+    });
+
+    describe('com locais carregados da API (com version)', () => {
+      const loaded: Location = { id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', endereco: 'Rua A', ativo: true, version: 3 };
+
+      beforeEach(() => {
+        useAppStore.setState({ locations: [loaded], locationsStatus: 'ready', locationsError: null });
+      });
+
+      it('updateLocation envia o version e atualiza a lista', async () => {
+        const updated: Location = { ...loaded, nome: 'Matriz SP', version: 4 };
+        mocked(locationsApi.updateLocation).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Matriz SP' });
+
+        expect(result).toEqual({ ok: true });
+        expect(locationsApi.updateLocation).toHaveBeenCalledWith('loc-1', { nome: 'Matriz SP', endereco: undefined }, 3);
+        expect(useAppStore.getState().locations).toEqual([updated]);
+      });
+
+      it('updateLocation não chama a API com nome vazio', async () => {
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: ' ' });
+
+        expect(result).toEqual({ ok: false, error: 'Informe o nome do local.' });
+        expect(locationsApi.updateLocation).not.toHaveBeenCalled();
+      });
+
+      it('updateLocation propaga erro de rede e não altera a lista', async () => {
+        mocked(locationsApi.updateLocation).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+        const result = await useAppStore.getState().updateLocation('loc-1', { nome: 'Novo nome' });
+
+        expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
+        expect(useAppStore.getState().locations).toEqual([loaded]);
+      });
+
+      it('setLocationActive envia o version e guarda o local retornado (com o version novo)', async () => {
+        const updated: Location = { ...loaded, ativo: false, version: 4 };
+        mocked(locationsApi.setLocationActive).mockResolvedValue(updated);
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+
+        expect(result).toEqual({ ok: true });
+        expect(locationsApi.setLocationActive).toHaveBeenCalledWith('loc-1', false, 3);
+        expect(useAppStore.getState().locations).toEqual([updated]);
+      });
+
+      it('VERSION_CONFLICT recarrega a lista (sem piscar loading) e devolve a mensagem', async () => {
+        const fresh: Location = { ...loaded, nome: 'Matriz (outra pessoa editou)', version: 5 };
+        mocked(locationsApi.setLocationActive).mockRejectedValue(
+          new ApiError('Este registro foi alterado por outra pessoa.', 409, undefined, 'VERSION_CONFLICT')
+        );
+        mocked(locationsApi.listLocations).mockResolvedValue([fresh]);
+        const statuses: string[] = [];
+        const unsubscribe = useAppStore.subscribe((st) => statuses.push(st.locationsStatus));
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+        unsubscribe();
+
+        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(useAppStore.getState().locations).toEqual([fresh]);
+        expect(statuses).not.toContain('loading');
+      });
+
+      it('sem version conhecido, não chama a API e pede para recarregar', async () => {
+        useAppStore.setState({ locations: [{ ...loaded, version: undefined }] });
+
+        const result = await useAppStore.getState().setLocationActive('loc-1', false);
+
+        expect(result).toEqual({ ok: false, error: 'Recarregue a lista de locais e tente de novo.' });
+        expect(locationsApi.setLocationActive).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('loadLocations', () => {
+      it('carrega a lista da API e marca como pronta', async () => {
+        const list: Location[] = [{ id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', ativo: true, version: 0 }];
+        mocked(locationsApi.listLocations).mockResolvedValue(list);
+        useAppStore.setState({ locationsStatus: 'idle' });
+
+        const promise = useAppStore.getState().loadLocations();
+        expect(useAppStore.getState().locationsStatus).toBe('loading');
+        await promise;
+
+        expect(useAppStore.getState().locations).toEqual(list);
+        expect(useAppStore.getState().locationsStatus).toBe('ready');
+        expect(useAppStore.getState().locationsError).toBeNull();
+      });
+
+      it('lista vazia é um resultado válido (estado vazio, não erro)', async () => {
+        mocked(locationsApi.listLocations).mockResolvedValue([]);
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locations).toEqual([]);
+        expect(useAppStore.getState().locationsStatus).toBe('ready');
+      });
+
+      it('falha da API vira estado de erro com a mensagem, sem trocar a lista', async () => {
+        const before = useAppStore.getState().locations;
+        useAppStore.setState({ locationsStatus: 'idle' });
+        mocked(locationsApi.listLocations).mockRejectedValue(new ApiError('Você não tem permissão para realizar esta ação.', 403));
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locationsStatus).toBe('error');
+        expect(useAppStore.getState().locationsError).toBe('Você não tem permissão para realizar esta ação.');
+        expect(useAppStore.getState().locations).toBe(before);
+      });
+
+      it('erro de rede vira estado de erro', async () => {
+        useAppStore.setState({ locationsStatus: 'idle' });
+        mocked(locationsApi.listLocations).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+        await useAppStore.getState().loadLocations();
+
+        expect(useAppStore.getState().locationsStatus).toBe('error');
+        expect(useAppStore.getState().locationsError).toBe('Sem conexão.');
+      });
     });
   });
 
@@ -285,6 +542,54 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       expect(result).toEqual({ ok: true });
       expect(useAppStore.getState().accessRequests.find((r) => r.id === request.id)?.status).toBe('APROVADA');
       expect(useAppStore.getState().users).toContainEqual(created);
+    });
+  });
+
+  describe('merge das páginas carregadas (PBI-0017.1)', () => {
+    afterEach(() => {
+      useAppStore.setState({ users: initialUsersForMerge, clients: initialClientsForMerge, locations: initialLocationsForMerge });
+    });
+
+    it('mergeUsers atualiza o version dos já conhecidos e acrescenta os novos, sem perder os demais', () => {
+      useAppStore.setState({
+        users: [
+          { id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 1 },
+          { id: 'u2', nome: 'Bia', email: 'bia@x.com', role: 'SUPERVISOR', status: 'ATIVO', version: 1 },
+        ],
+      });
+
+      useAppStore.getState().mergeUsers([
+        { id: 'u2', nome: 'Bia Souza', email: 'bia@x.com', role: 'SUPERVISOR', status: 'ATIVO', version: 4 },
+        { id: 'u3', nome: 'Caio', email: 'caio@x.com', role: 'TECHNICIAN', status: 'ATIVO', version: 0 },
+      ]);
+
+      const users = useAppStore.getState().users;
+      expect(users.map((u) => u.id)).toEqual(['u1', 'u2', 'u3']);
+      expect(users.find((u) => u.id === 'u2')).toMatchObject({ nome: 'Bia Souza', version: 4 });
+      expect(users.find((u) => u.id === 'u1')?.version).toBe(1);
+    });
+
+    it('mergeClients e mergeLocations seguem a mesma regra', () => {
+      useAppStore.setState({
+        clients: [{ id: 'c1', nome: 'Acme', ativo: true, version: 0 }],
+        locations: [{ id: 'l1', clienteId: 'c1', nome: 'Matriz', ativo: true, version: 0 }],
+      });
+
+      useAppStore.getState().mergeClients([{ id: 'c1', nome: 'Acme Ltda', ativo: false, version: 2 }]);
+      useAppStore.getState().mergeLocations([{ id: 'l2', clienteId: 'c1', nome: 'Filial', ativo: true, version: 0 }]);
+
+      expect(useAppStore.getState().clients).toEqual([{ id: 'c1', nome: 'Acme Ltda', ativo: false, version: 2 }]);
+      expect(useAppStore.getState().locations.map((l) => l.id)).toEqual(['l1', 'l2']);
+    });
+
+    it('depois do merge, editar usa o version da página carregada', async () => {
+      useAppStore.setState({ users: [{ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 1 }] });
+      useAppStore.getState().mergeUsers([{ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'ATIVO', version: 7 }]);
+      mocked(usersApi.setUserStatus).mockResolvedValue({ id: 'u1', nome: 'Ana', email: 'ana@x.com', role: 'ADMIN', status: 'INATIVO', version: 8 });
+
+      await useAppStore.getState().setUserStatus('u1', 'INATIVO');
+
+      expect(usersApi.setUserStatus).toHaveBeenCalledWith('u1', 'INATIVO', 7);
     });
   });
 });

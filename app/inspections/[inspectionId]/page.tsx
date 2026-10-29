@@ -1,12 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { InspectionInstructions } from '@/components/InspectionInstructions';
+import { formatDateTime } from '@/lib/inspection-display';
 import { ErrorState, InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { CancelInspectionDialog } from '@/components/inspections/CancelInspectionDialog';
+import { CancelInspectionAction } from '@/components/inspections/CancelInspectionAction';
+import { CancellationInfo } from '@/components/inspections/CancellationInfo';
 
 /**
  * UC-16 — Revisar inspeção / UC-17 — Aprovar ou reprovar inspeção.
@@ -30,6 +35,7 @@ export default function InspectionReviewPage() {
   const approveInspection = useAppStore((s) => s.approveInspection);
   const rejectInspection = useAppStore((s) => s.rejectInspection);
   const returnForCorrection = useAppStore((s) => s.returnForCorrection);
+  const cancelInspection = useAppStore((s) => s.cancelInspection);
 
   const review = useAsyncAction();
   const [comentario, setComentario] = useState('');
@@ -39,6 +45,14 @@ export default function InspectionReviewPage() {
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnFeedback, setReturnFeedback] = useState('');
   const [returnError, setReturnError] = useState<string | null>(null);
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!cancelNotice) return;
+    const timer = setTimeout(() => setCancelNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [cancelNotice]);
 
   if (!inspection) return <ErrorState title="Inspeção não encontrada" message="Ela pode ter sido removida ou o link está incorreto." />;
 
@@ -49,6 +63,12 @@ export default function InspectionReviewPage() {
   const tech = users.find((u) => u.id === inspection.tecnicoId);
 
   const canReview = inspection.status === 'ENVIADA' || inspection.status === 'EM_REVISAO';
+
+  async function handleCancel(justificativa: string) {
+    const result = await cancelInspection(inspection!.id, justificativa);
+    if (result.ok) setCancelNotice('Inspeção cancelada com sucesso.');
+    return result;
+  }
 
   function handleOpenReview() {
     return review.run(() => startReview(inspection!.id));
@@ -91,8 +111,20 @@ export default function InspectionReviewPage() {
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Técnico</span>{tech?.nome}</div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Prioridade</span><PriorityTag priority={inspection.prioridade} /></div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Modelo</span>{model?.title} · v{inspection.modeloVersao}</div>
-        <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Data prevista</span>{new Date(inspection.dataPrevista).toLocaleString('pt-BR')}</div>
+        <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Data prevista</span>{formatDateTime(inspection.dataPrevista)}</div>
+        <InspectionInstructions text={inspection.orientacoes} />
       </div>
+
+      {cancelNotice && (
+        <div role="status" className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3 mb-5">
+          {cancelNotice}
+        </div>
+      )}
+
+      {inspection.cancelamento && <CancellationInfo cancelamento={inspection.cancelamento} />}
+
+      {/* RN-029/030: cancelar exige justificativa; aprovada não cancela pelo fluxo comum. */}
+      <CancelInspectionAction status={inspection.status} onCancel={() => setShowCancel(true)} />
 
       {inspection.status === 'ENVIADA' && (
         <button onClick={handleOpenReview} disabled={review.pending} className="w-full bg-navy-800 text-white rounded-xl py-3 font-bold mb-5 disabled:opacity-60">
@@ -229,6 +261,16 @@ export default function InspectionReviewPage() {
           {inspection.review.decidedAt ? ` em ${new Date(inspection.review.decidedAt).toLocaleString('pt-BR')}` : ''}.
           {inspection.review.motivoReprovacao ? ` Motivo: ${inspection.review.motivoReprovacao}` : ''}
         </div>
+      )}
+
+      {showCancel && (
+        <CancelInspectionDialog
+          inspectionId={inspection.id}
+          clientName={client?.nome}
+          locationName={location?.nome}
+          onConfirm={handleCancel}
+          onClose={() => setShowCancel(false)}
+        />
       )}
     </div>
   );

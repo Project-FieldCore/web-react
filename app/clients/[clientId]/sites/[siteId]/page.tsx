@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ActiveBadge } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
+import { ErrorState, LoadingState } from '@/components/States';
 
 /**
  * Detalhe do local + gestão dos seus equipamentos.
@@ -17,7 +18,12 @@ export default function SiteDetailPage() {
   const router = useRouter();
 
   const client = useAppStore((s) => s.clients.find((c) => c.id === clientId));
+  const clientsStatus = useAppStore((s) => s.clientsStatus);
+  const loadClients = useAppStore((s) => s.loadClients);
   const location = useAppStore((s) => s.locations.find((l) => l.id === siteId));
+  const locationsStatus = useAppStore((s) => s.locationsStatus);
+  const locationsError = useAppStore((s) => s.locationsError);
+  const loadLocations = useAppStore((s) => s.loadLocations);
   const equipmentList = useAppStore((s) => s.equipment.filter((e) => e.localId === siteId));
   const updateLocation = useAppStore((s) => s.updateLocation);
   const setLocationActive = useAppStore((s) => s.setLocationActive);
@@ -27,22 +33,71 @@ export default function SiteDetailPage() {
 
   const [showNewEquipment, setShowNewEquipment] = useState(false);
   const [nome, setNome] = useState(location?.nome ?? '');
+  const [endereco, setEndereco] = useState(location?.endereco ?? '');
   const [editError, setEditError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
+  // Cliente e local vêm da API — carrega ao abrir (inclusive em link direto ou refresh).
+  useEffect(() => {
+    void loadClients();
+    void loadLocations();
+  }, [loadClients, loadLocations]);
+
+  // Sincroniza os campos quando o local chega (ou muda) da API.
+  useEffect(() => {
+    setNome(location?.nome ?? '');
+    setEndereco(location?.endereco ?? '');
+  }, [location?.nome, location?.endereco, location?.version]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const loading =
+    (!client && (clientsStatus === 'idle' || clientsStatus === 'loading')) ||
+    (!location && (locationsStatus === 'idle' || locationsStatus === 'loading'));
+  if (loading) return <LoadingState label="Carregando local..." />;
+  if ((!client && clientsStatus === 'error') || (!location && locationsStatus === 'error')) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar o local"
+        message={(!location ? locationsError : null) ?? 'Tente novamente.'}
+        onRetry={() => {
+          void loadClients();
+          void loadLocations();
+        }}
+      />
+    );
+  }
   if (!client || !location || location.clienteId !== client.id) {
-    return <div className="text-slate-500">Local não encontrado.</div>;
+    return <ErrorState title="Local não encontrado" message="Ele pode ter sido removido ou o link está incorreto." />;
   }
 
-  async function handleRename() {
-    if (nome === location!.nome) return;
-    const result = await updateLocation(location!.id, { nome });
-    if (!result.ok) setEditError(result.error);
-    else setEditError(null);
+  // Salva nome e/ou endereço ao sair do campo, só do que mudou.
+  async function handleSave() {
+    const patch: { nome?: string; endereco?: string } = {};
+    if (nome !== location!.nome) patch.nome = nome;
+    if (endereco !== (location!.endereco ?? '')) patch.endereco = endereco;
+    if (Object.keys(patch).length === 0) return;
+    const result = await updateLocation(location!.id, patch);
+    if (!result.ok) {
+      setEditError(result.error);
+      return;
+    }
+    setEditError(null);
+    setNotice('Alterações salvas.');
   }
 
   async function handleToggleLocationActive() {
     const result = await setLocationActive(location!.id, !location!.ativo);
-    if (!result.ok) setEditError(result.error);
+    if (!result.ok) {
+      setEditError(result.error);
+      return;
+    }
+    setEditError(null);
+    setNotice(location!.ativo ? 'Local inativado.' : 'Local ativado.');
   }
 
   return (
@@ -56,14 +111,22 @@ export default function SiteDetailPage() {
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            onBlur={handleRename}
+            onBlur={handleSave}
             className="text-lg sm:text-xl font-extrabold text-navy-900 border-b border-transparent focus:border-navy-700 outline-none w-full sm:flex-1 sm:min-w-[200px]"
           />
           <ActiveBadge ativo={location.ativo} />
         </div>
-        {editError && <p className="text-xs text-red-600 font-semibold mb-3">{editError}</p>}
+        {editError && <p role="alert" className="text-xs text-red-600 font-semibold mb-3">{editError}</p>}
+        {notice && <p role="status" className="text-xs text-emerald-700 font-semibold mb-3">{notice}</p>}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <span className="text-sm text-slate-500">{location.endereco ?? 'Endereço não informado'}</span>
+          <input
+            value={endereco}
+            onChange={(e) => setEndereco(e.target.value)}
+            onBlur={handleSave}
+            placeholder="Endereço não informado"
+            aria-label="Endereço"
+            className="text-sm text-slate-500 border-b border-transparent focus:border-navy-700 outline-none w-full sm:flex-1 sm:min-w-[240px]"
+          />
           <button
             onClick={handleToggleLocationActive}
             className={`text-sm font-semibold ${location.ativo ? 'text-slate-500' : 'text-emerald-600'}`}

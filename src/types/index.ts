@@ -16,7 +16,7 @@ export type InspectionStatus =
   | 'REPROVADA'
   | 'CANCELADA';
 
-export type ModelStatus = 'RASCUNHO' | 'PUBLICADO';
+export type ModelStatus = 'RASCUNHO' | 'PUBLICADO' | 'ARQUIVADO';
 
 export type ItemType =
   | 'TEXT_SHORT'
@@ -32,8 +32,10 @@ export interface ModelItem {
   title: string;
   type: ItemType;
   required: boolean;
-  /** RN-039: item crítico — exige evidência quando não conforme. */
-  needsEvidenceOnNok: boolean;
+  /** RN-039: item crítico — exige evidência quando não conforme (`evidence_required_on_failure` na API). */
+  evidenceRequiredOnFailure: boolean;
+  /** Exige observação quando não conforme (`observation_required_on_failure` na API). */
+  observationRequiredOnFailure: boolean;
   /** Alternativas disponíveis quando type === 'SINGLE_CHOICE'. */
   options?: string[];
 }
@@ -41,7 +43,18 @@ export interface ModelItem {
 export interface ModelSection {
   id: string;
   title: string;
+  description?: string;
+  /** RN-017: ordem explícita (0, 1, 2…), única dentro da versão do modelo. */
+  displayOrder: number;
   items: ModelItem[];
+}
+
+/** Conteúdo de uma versão do modelo (o que a publicação congela — RN-019). */
+export interface ModelSnapshot {
+  title: string;
+  description: string;
+  category: string;
+  sections: ModelSection[];
 }
 
 export interface InspectionModel {
@@ -50,10 +63,29 @@ export interface InspectionModel {
   description: string;
   category: string;
   status: ModelStatus;
-  /** RN-020: alterações em um modelo publicado geram nova versão. */
+  /** RN-020: alterações em um modelo publicado geram nova versão (0 enquanto é rascunho). */
   version: number;
+  /**
+   * Versão de edição da API (trava otimista), diferente da `version` publicada.
+   * Ausente nos modelos locais (dados de exemplo), que não existem na API.
+   */
+  lockVersion?: number;
+  /**
+   * Id da versão publicada na API (`templateVersionId`), que o agendamento exige.
+   * A API ainda não expõe esse id ao front (não há endpoint de publicar nem de
+   * listar versões); modelos sem ele são agendados só na tela.
+   */
+  templateVersionId?: string;
   sections: ModelSection[];
   updatedAt: string;
+  /**
+   * Foto da versão publicada (RN-019: imutável). Nunca muda depois de publicada;
+   * as alterações são feitas na cópia de trabalho (os campos acima) e só viram
+   * a próxima versão ao publicar (RN-020).
+   */
+  publishedSnapshot?: ModelSnapshot;
+  /** Há uma nova versão sendo editada sobre a cópia de trabalho de um modelo publicado. */
+  editingNewVersion?: boolean;
 }
 
 /**
@@ -83,6 +115,8 @@ export interface Client {
   cnpj?: string;
   /** RN-013: inativação em vez de exclusão física. */
   ativo: boolean;
+  /** Versão da API (trava otimista): obrigatória para editar e mudar status. */
+  version?: number;
 }
 
 export interface Location {
@@ -93,6 +127,8 @@ export interface Location {
   ativo: boolean;
   lat?: number;
   lng?: number;
+  /** Versão da API (trava otimista): obrigatória para editar e mudar status. */
+  version?: number;
 }
 
 export interface Equipment {
@@ -157,6 +193,15 @@ export interface ReviewInfo {
   decidedAt?: string;
 }
 
+/** Quem cancelou a inspeção, quando e por quê (RN-029). */
+export interface Cancellation {
+  porNome: string;
+  porId?: string;
+  /** Data e hora do cancelamento (ISO). */
+  em: string;
+  justificativa: string;
+}
+
 /** Registro de devolução da inspeção para correção do técnico (feedback do gestor). */
 export interface CorrectionFeedback {
   supervisorNome: string;
@@ -184,6 +229,8 @@ export interface Inspection {
   qrConfirmadoEm?: string;
   /** Histórico de devoluções para correção (mais recente por último). */
   correcoes?: CorrectionFeedback[];
+  /** Preenchido quando a inspeção é cancelada (RN-029). */
+  cancelamento?: Cancellation;
 }
 
 /**

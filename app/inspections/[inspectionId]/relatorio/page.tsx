@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { CriticidadeTag, InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { formatDateTime, formatInstructions } from '@/lib/inspection-display';
 import { ErrorState } from '@/components/States';
 import type { Answer } from '@/types';
 
@@ -73,7 +74,7 @@ export default function InspectionReportPage() {
           <Field label="Equipamento" value={equipment?.nome ?? 'Não vinculado'} />
           <Field label="Técnico" value={tech?.nome} />
           <Field label="Modelo" value={model ? `${model.title} · v${inspection.modeloVersao}` : undefined} />
-          <Field label="Data prevista" value={new Date(inspection.dataPrevista).toLocaleString('pt-BR')} />
+          <Field label="Data prevista" value={formatDateTime(inspection.dataPrevista)} />
           {inspection.geolocalizacao && (
             <Field
               label="Localização capturada"
@@ -85,10 +86,20 @@ export default function InspectionReportPage() {
           )}
         </dl>
 
-        {inspection.orientacoes && (
+        {inspection.cancelamento && (
+          <section className="mb-6 print:break-inside-avoid">
+            <h2 className="text-xs font-extrabold text-navy-700 uppercase mb-1">Cancelamento</h2>
+            <p>
+              Cancelada por {inspection.cancelamento.porNome} em {formatDateTime(inspection.cancelamento.em)}.
+            </p>
+            <p className="whitespace-pre-wrap break-words mt-1">{inspection.cancelamento.justificativa}</p>
+          </section>
+        )}
+
+        {formatInstructions(inspection.orientacoes) && (
           <section className="mb-6 print:break-inside-avoid">
             <h2 className="text-xs font-extrabold text-navy-700 uppercase mb-1">Orientações</h2>
-            <p>{inspection.orientacoes}</p>
+            <p className="whitespace-pre-wrap break-words">{formatInstructions(inspection.orientacoes)}</p>
           </section>
         )}
 

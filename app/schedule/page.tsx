@@ -1,13 +1,19 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { PRIORITY_LABEL, formatDateTime, summarizeInstructions } from '@/lib/inspection-display';
+import {
+  MAX_INSTRUCTIONS,
+  isLocalOnlySchedule,
+  missingScheduleFields,
+  validateScheduleDate,
+} from '@/lib/schedule-rules';
 import type { Priority } from '@/types';
 
-const PRIORITY_LABEL: Record<Priority, string> = { ALTA: 'Alta', MEDIA: 'Média', BAIXA: 'Baixa' };
 
 /**
  * UC-06 — Agendar e atribuir inspeção.
@@ -19,7 +25,11 @@ export default function SchedulePage() {
   const router = useRouter();
   const models = useAppStore((s) => s.models.filter((m) => m.status === 'PUBLICADO'));
   const clients = useAppStore((s) => s.clients);
+  const clientsStatus = useAppStore((s) => s.clientsStatus);
+  const loadClients = useAppStore((s) => s.loadClients);
   const locations = useAppStore((s) => s.locations);
+  const locationsStatus = useAppStore((s) => s.locationsStatus);
+  const loadLocations = useAppStore((s) => s.loadLocations);
   const equipment = useAppStore((s) => s.equipment);
   const technicians = useAppStore((s) => s.users.filter((u) => u.role === 'TECHNICIAN'));
   const scheduleInspection = useAppStore((s) => s.scheduleInspection);
@@ -35,7 +45,20 @@ export default function SchedulePage() {
   const submit = useAsyncAction();
   const [success, setSuccess] = useState<string | null>(null);
 
-  const availableLocations = useMemo(() => locations.filter((l) => l.clienteId === clienteId), [locations, clienteId]);
+  // Clientes vêm da API; cliente inativo fica fora de novos agendamentos.
+  useEffect(() => {
+    void loadClients();
+    void loadLocations();
+  }, [loadClients, loadLocations]);
+  const activeClients = useMemo(() => clients.filter((c) => c.ativo), [clients]);
+  const clientsLoading = clientsStatus === 'idle' || clientsStatus === 'loading';
+
+  // Local inativo (inativação lógica) fica fora de novos agendamentos.
+  const availableLocations = useMemo(
+    () => locations.filter((l) => l.clienteId === clienteId && l.ativo),
+    [locations, clienteId]
+  );
+  const locationsLoading = locationsStatus === 'idle' || locationsStatus === 'loading';
   const availableEquipment = useMemo(() => equipment.filter((e) => e.localId === localId), [equipment, localId]);
 
   const selectedModel = models.find((m) => m.id === modeloId);
@@ -43,15 +66,22 @@ export default function SchedulePage() {
   const selectedLocation = locations.find((l) => l.id === localId);
   const selectedEquipment = equipment.find((e) => e.id === equipamentoId);
   const selectedTech = technicians.find((t) => t.id === tecnicoId);
+  const activeTechnicians = technicians.filter((t) => t.status === 'ATIVO');
+  const localOnly = isLocalOnlySchedule(selectedModel);
 
-  // RN-025: campos obrigatórios para habilitar o envio
-  const missing: string[] = [];
-  if (!modeloId) missing.push('Modelo');
-  if (!clienteId) missing.push('Cliente');
-  if (!localId) missing.push('Local');
-  if (!tecnicoId) missing.push('Técnico');
-  if (!dataPrevista) missing.push('Data prevista');
-  const isComplete = missing.length === 0;
+  // RN-025: campos obrigatórios para habilitar o envio; a API também exige data futura.
+  const missing = missingScheduleFields({ modeloId, clienteId, localId, tecnicoId, dataPrevista });
+  const dateError = validateScheduleDate(dataPrevista);
+  const isComplete = missing.length === 0 && !dateError;
+
+  // `min` do campo de data: agora, no fuso local (formato do datetime-local). Calculado só depois de
+  // montar, para o servidor e o navegador não divergirem na hidratação.
+  const [minDateTime, setMinDateTime] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    setMinDateTime(now.toISOString().slice(0, 16));
+  }, []);
 
   async function handleSubmit() {
     setSuccess(null);
@@ -66,7 +96,7 @@ export default function SchedulePage() {
       orientacoes,
     }));
     if (!result.ok) return;
-    setSuccess(`Inspeção ${result.id} agendada com sucesso.`);
+    setSuccess(`Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}.`);
     setTimeout(() => router.push('/inspections'), 900);
   }
 
@@ -91,6 +121,12 @@ export default function SchedulePage() {
                 Nenhum modelo publicado disponível. Publique uma versão em Modelos de inspeção (RN-024).
               </p>
             )}
+            {selectedModel && localOnly && (
+              <p role="note" className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mt-3">
+                Este modelo ainda não está ligado a uma versão publicada na API. O agendamento fica só nesta sessão e não é
+                enviado ao servidor.
+              </p>
+            )}
           </Section>
 
           <Section step={2} title="Cliente e local">
@@ -99,22 +135,47 @@ export default function SchedulePage() {
                 <select
                   value={clienteId}
                   onChange={(e) => { setClienteId(e.target.value); setLocalId(''); setEquipamentoId(''); }}
-                  className="input"
+                  disabled={clientsLoading}
+                  className="input disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">Selecione...</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  <option value="">{clientsLoading ? 'Carregando clientes...' : 'Selecione...'}</option>
+                  {activeClients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                 </select>
+                {clientsStatus === 'ready' && activeClients.length === 0 && (
+                  <p className="text-xs text-amber-700 mt-1">Nenhum cliente ativo. Cadastre ou ative um cliente em Clientes e locais.</p>
+                )}
+                {clientsStatus === 'error' && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                    Não foi possível carregar os clientes.{' '}
+                    <button type="button" onClick={() => void loadClients()} className="underline">
+                      Tentar novamente
+                    </button>
+                  </p>
+                )}
               </Field>
               <Field label="Local" required>
                 <select
                   value={localId}
                   onChange={(e) => { setLocalId(e.target.value); setEquipamentoId(''); }}
-                  disabled={!clienteId}
+                  disabled={!clienteId || locationsLoading}
                   className="input disabled:bg-slate-50 disabled:text-slate-400"
                 >
-                  <option value="">{clienteId ? 'Selecione...' : 'Selecione um cliente primeiro'}</option>
+                  <option value="">
+                    {!clienteId ? 'Selecione um cliente primeiro' : locationsLoading ? 'Carregando locais...' : 'Selecione...'}
+                  </option>
                   {availableLocations.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
                 </select>
+                {clienteId && locationsStatus === 'ready' && availableLocations.length === 0 && (
+                  <p className="text-xs text-amber-700 mt-1">Este cliente não tem locais ativos. Cadastre um local no cliente.</p>
+                )}
+                {locationsStatus === 'error' && (
+                  <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                    Não foi possível carregar os locais.{' '}
+                    <button type="button" onClick={() => void loadLocations()} className="underline">
+                      Tentar novamente
+                    </button>
+                  </p>
+                )}
               </Field>
             </div>
             <Field label="Equipamento (opcional para inspeções de local/ambiente — RN-026)">
@@ -127,6 +188,11 @@ export default function SchedulePage() {
                 <option value="">Nenhum equipamento específico</option>
                 {availableEquipment.map((eq) => <option key={eq.id} value={eq.id}>{eq.nome}</option>)}
               </select>
+              {equipamentoId && !localOnly && (
+                <p className="text-xs text-slate-500 mt-1">
+                  O equipamento fica registrado só na tela: a API de agendamento ainda não o recebe.
+                </p>
+              )}
             </Field>
           </Section>
 
@@ -139,6 +205,9 @@ export default function SchedulePage() {
                     <option key={t.id} value={t.id} disabled={t.status !== 'ATIVO'}>{t.nome}{t.status !== 'ATIVO' ? ' (inativo)' : ''}</option>
                   ))}
                 </select>
+                {activeTechnicians.length === 0 && (
+                  <p className="text-xs text-amber-700 mt-1">Nenhum técnico ativo disponível para atribuição (RN-027).</p>
+                )}
               </Field>
               <Field label="Prioridade" required>
                 <select value={prioridade} onChange={(e) => setPrioridade(e.target.value as Priority)} className="input">
@@ -152,9 +221,17 @@ export default function SchedulePage() {
               <input
                 type="datetime-local"
                 value={dataPrevista}
+                min={minDateTime}
                 onChange={(e) => setDataPrevista(e.target.value)}
+                aria-invalid={dateError ? true : undefined}
+                aria-describedby={dateError ? 'schedule-date-error' : undefined}
                 className="input sm:max-w-xs"
               />
+              {dateError && (
+                <p id="schedule-date-error" role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                  {dateError}
+                </p>
+              )}
             </Field>
           </Section>
 
@@ -164,9 +241,13 @@ export default function SchedulePage() {
                 value={orientacoes}
                 onChange={(e) => setOrientacoes(e.target.value)}
                 rows={3}
+                maxLength={MAX_INSTRUCTIONS}
                 className="input resize-none"
                 placeholder="Instruções específicas para o técnico, pontos de atenção, etc."
               />
+              <p className="text-[11px] text-slate-400 text-right mt-1">
+                {orientacoes.length}/{MAX_INSTRUCTIONS}
+              </p>
             </Field>
           </Section>
 
@@ -181,10 +262,13 @@ export default function SchedulePage() {
             >
               {submit.pending ? 'Agendando...' : 'Confirmar agendamento'}
             </button>
-            {!isComplete && (
+            {missing.length > 0 && (
               <p className="text-xs text-slate-400 text-center mt-2">
                 Preencha os campos obrigatórios: {missing.join(', ')}.
               </p>
+            )}
+            {missing.length === 0 && dateError && (
+              <p className="text-xs text-red-600 text-center mt-2">{dateError}</p>
             )}
           </div>
         </div>
@@ -199,7 +283,8 @@ export default function SchedulePage() {
               <SummaryRow label="Equipamento" value={selectedEquipment?.nome ?? (localId ? 'Nenhum específico' : undefined)} />
               <SummaryRow label="Técnico" value={selectedTech?.nome} />
               <SummaryRow label="Prioridade" value={PRIORITY_LABEL[prioridade]} />
-              <SummaryRow label="Data prevista" value={dataPrevista ? new Date(dataPrevista).toLocaleString('pt-BR') : undefined} />
+              <SummaryRow label="Data prevista" value={dataPrevista ? formatDateTime(dataPrevista) : undefined} />
+              <SummaryRow label="Orientações" value={summarizeInstructions(orientacoes) ?? undefined} emptyLabel="Nenhuma" />
             </dl>
           </div>
 
@@ -207,7 +292,8 @@ export default function SchedulePage() {
             <h2 className="text-xs font-bold text-brandgreen-500 uppercase mb-2">Regras de negócio</h2>
             <ul className="space-y-2 text-xs text-slate-300 leading-relaxed">
               <li><strong className="text-white">RN-024</strong> — Somente modelos com versão publicada podem ser usados.</li>
-              <li><strong className="text-white">RN-025</strong> — Cliente, local, técnico e data prevista são obrigatórios.</li>
+              <li><strong className="text-white">RN-025</strong> — Cliente, local, técnico e data prevista (no futuro) são obrigatórios.</li>
+              <li><strong className="text-white">Estado inicial</strong> — A inspeção nasce Atribuída ao técnico escolhido.</li>
               <li><strong className="text-white">RN-027</strong> — Apenas técnicos ativos podem receber novas atribuições.</li>
             </ul>
           </div>
@@ -256,11 +342,13 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value?: string }) {
+function SummaryRow({ label, value, emptyLabel = 'Pendente' }: { label: string; value?: string; emptyLabel?: string }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <dt className="text-slate-400 font-semibold shrink-0">{label}</dt>
-      <dd className={`text-right font-semibold ${value ? 'text-navy-900' : 'text-slate-300 italic'}`}>{value ?? 'Pendente'}</dd>
+      <dd className={`text-right font-semibold min-w-0 break-words whitespace-pre-line ${value ? 'text-navy-900' : 'text-slate-300 italic'}`}>
+        {value ?? emptyLabel}
+      </dd>
     </div>
   );
 }

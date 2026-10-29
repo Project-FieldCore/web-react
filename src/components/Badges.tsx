@@ -20,6 +20,7 @@ export function InspectionStatusBadge({ status }: { status: InspectionStatus }) 
 const MODEL_STATUS_MAP: Record<ModelStatus, { label: string; className: string }> = {
   RASCUNHO: { label: 'Rascunho', className: 'bg-slate-100 text-slate-600' },
   PUBLICADO: { label: 'Publicado', className: 'bg-emerald-100 text-emerald-700' },
+  ARQUIVADO: { label: 'Arquivado', className: 'bg-amber-100 text-amber-700' },
 };
 
 export function ModelStatusBadge({ status }: { status: ModelStatus }) {
