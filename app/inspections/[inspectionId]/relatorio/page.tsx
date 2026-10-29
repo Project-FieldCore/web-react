@@ -86,6 +86,16 @@ export default function InspectionReportPage() {
           )}
         </dl>
 
+        {inspection.cancelamento && (
+          <section className="mb-6 print:break-inside-avoid">
+            <h2 className="text-xs font-extrabold text-navy-700 uppercase mb-1">Cancelamento</h2>
+            <p>
+              Cancelada por {inspection.cancelamento.porNome} em {formatDateTime(inspection.cancelamento.em)}.
+            </p>
+            <p className="whitespace-pre-wrap break-words mt-1">{inspection.cancelamento.justificativa}</p>
+          </section>
+        )}
+
         {formatInstructions(inspection.orientacoes) && (
           <section className="mb-6 print:break-inside-avoid">
             <h2 className="text-xs font-extrabold text-navy-700 uppercase mb-1">Orientações</h2>

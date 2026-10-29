@@ -16,6 +16,7 @@ const FILTERS: { key: 'TODAS' | InspectionStatus; label: string }[] = [
   { key: 'DEVOLVIDA', label: 'Devolvidas' },
   { key: 'APROVADA', label: 'Aprovadas' },
   { key: 'REPROVADA', label: 'Reprovadas' },
+  { key: 'CANCELADA', label: 'Canceladas' },
 ];
 
 /**

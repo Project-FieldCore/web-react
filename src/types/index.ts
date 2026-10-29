@@ -193,6 +193,15 @@ export interface ReviewInfo {
   decidedAt?: string;
 }
 
+/** Quem cancelou a inspeção, quando e por quê (RN-029). */
+export interface Cancellation {
+  porNome: string;
+  porId?: string;
+  /** Data e hora do cancelamento (ISO). */
+  em: string;
+  justificativa: string;
+}
+
 /** Registro de devolução da inspeção para correção do técnico (feedback do gestor). */
 export interface CorrectionFeedback {
   supervisorNome: string;
@@ -220,6 +229,8 @@ export interface Inspection {
   qrConfirmadoEm?: string;
   /** Histórico de devoluções para correção (mais recente por último). */
   correcoes?: CorrectionFeedback[];
+  /** Preenchido quando a inspeção é cancelada (RN-029). */
+  cancelamento?: Cancellation;
 }
 
 /**

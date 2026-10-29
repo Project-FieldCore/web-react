@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import { MOCK_INSPECTIONS, MOCK_MODELS, MOCK_USERS } from '@/data/mock-data';
@@ -436,6 +436,144 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
       expect(find(SENT_ID).status).toBe('EM_ANDAMENTO');
       expect(useAppStore.getState().syncQueue).toHaveLength(1);
+    });
+  });
+
+  describe('cancelamento com justificativa (RN-029/030)', () => {
+    const SUPERVISOR = { id: 'usr-super', nome: 'Marina Costa', email: 'marina@fieldcore.com', role: 'SUPERVISOR' as const, status: 'ATIVO' as const };
+    const setStatus = (id: string, status: Inspection['status']) =>
+      useAppStore.setState((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, status } : i)) }));
+    const apiMocks = () => Object.values(inspectionsApi).filter((fn) => typeof fn === 'function');
+
+    beforeEach(() => {
+      useAppStore.setState({ currentUser: SUPERVISOR });
+    });
+    afterEach(() => {
+      useAppStore.setState({ currentUser: null });
+    });
+
+    it('cancela, vira CANCELADA e registra usuário, data e justificativa (RN-029)', async () => {
+      const before = Date.now();
+
+      const result = await useAppStore.getState().cancelInspection(ASSIGNED_ID, '  Cliente pediu o cancelamento.  ');
+
+      expect(result).toEqual({ ok: true });
+      const inspection = find(ASSIGNED_ID);
+      expect(inspection.status).toBe('CANCELADA');
+      expect(inspection.cancelamento).toMatchObject({
+        porNome: 'Marina Costa',
+        porId: 'usr-super',
+        justificativa: 'Cliente pediu o cancelamento.',
+      });
+      const when = new Date(inspection.cancelamento!.em).getTime();
+      expect(when).toBeGreaterThanOrEqual(before);
+      expect(when).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('registra no histórico quem cancelou e por quê', async () => {
+      await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Equipamento desativado');
+
+      expect(useAppStore.getState().auditEvents[0]).toMatchObject({
+        action: 'CANCELOU',
+        entity: 'Inspeção',
+        entityId: ASSIGNED_ID,
+        details: 'Equipamento desativado',
+        userNome: 'Marina Costa',
+      });
+    });
+
+    it('aprovada não cancela pelo fluxo comum (RN-030) e nada muda', async () => {
+      setStatus(SENT_ID, 'APROVADA');
+      const before = find(SENT_ID);
+      const auditBefore = useAppStore.getState().auditEvents.length;
+
+      const result = await useAppStore.getState().cancelInspection(SENT_ID, 'Tentativa');
+
+      expect(result).toEqual({ ok: false, error: 'Inspeção aprovada não pode ser cancelada pelo fluxo comum (RN-030).' });
+      expect(find(SENT_ID)).toEqual(before);
+      expect(useAppStore.getState().auditEvents).toHaveLength(auditBefore);
+    });
+
+    it('já cancelada não cancela de novo e preserva o primeiro registro', async () => {
+      await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Primeiro motivo');
+      const first = find(ASSIGNED_ID).cancelamento;
+
+      const again = await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Segundo motivo');
+
+      expect(again).toEqual({ ok: false, error: 'Esta inspeção já está cancelada.' });
+      expect(find(ASSIGNED_ID).cancelamento).toEqual(first);
+    });
+
+    it('justificativa vazia, só com espaços ou longa demais é recusada e nada muda', async () => {
+      const before = find(ASSIGNED_ID);
+
+      for (const text of ['', '   ', '\n\t']) {
+        expect(await useAppStore.getState().cancelInspection(ASSIGNED_ID, text)).toEqual({
+          ok: false,
+          error: 'Informe a justificativa do cancelamento (RN-029).',
+        });
+      }
+      expect(await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'x'.repeat(1001))).toEqual({
+        ok: false,
+        error: 'A justificativa deve ter no máximo 1000 caracteres.',
+      });
+      expect(find(ASSIGNED_ID)).toEqual(before);
+    });
+
+    it('justificativa com exatamente 1000 caracteres é aceita', async () => {
+      expect((await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'x'.repeat(1000))).ok).toBe(true);
+    });
+
+    it('sem sessão (usuário desconhecido), não cancela: o registro exige quem cancelou', async () => {
+      useAppStore.setState({ currentUser: null });
+
+      const result = await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Motivo');
+
+      expect(result).toEqual({ ok: false, error: 'Sua sessão expirou. Entre novamente para cancelar a inspeção.' });
+      expect(find(ASSIGNED_ID).status).toBe('ATRIBUIDA');
+    });
+
+    it('inspeção inexistente devolve erro', async () => {
+      expect(await useAppStore.getState().cancelInspection('INS-0000', 'Motivo')).toEqual({ ok: false, error: 'Inspeção não encontrada.' });
+    });
+
+    it('todos os estados em andamento ou pendentes podem ser cancelados', async () => {
+      for (const status of ['RASCUNHO', 'ATRIBUIDA', 'EM_ANDAMENTO', 'ENVIADA', 'EM_REVISAO', 'DEVOLVIDA', 'REPROVADA'] as const) {
+        setStatus(ASSIGNED_ID, status);
+        useAppStore.setState((s) => ({ inspections: s.inspections.map((i) => (i.id === ASSIGNED_ID ? { ...i, cancelamento: undefined } : i)) }));
+
+        const result = await useAppStore.getState().cancelInspection(ASSIGNED_ID, `Cancelar a partir de ${status}`);
+
+        expect(result, status).toEqual({ ok: true });
+        expect(find(ASSIGNED_ID).status).toBe('CANCELADA');
+      }
+    });
+
+    it('só a inspeção cancelada muda; as outras ficam intactas', async () => {
+      const others = useAppStore.getState().inspections.filter((i) => i.id !== ASSIGNED_ID);
+
+      await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Motivo');
+
+      expect(useAppStore.getState().inspections.filter((i) => i.id !== ASSIGNED_ID)).toEqual(others);
+    });
+
+    it('limpa da fila de sincronização só os itens da inspeção cancelada', async () => {
+      useAppStore.setState({
+        syncQueue: [
+          { id: 's1', inspectionId: ASSIGNED_ID, descricao: 'Resposta do checklist', createdAt: '2026-10-01T10:00:00.000Z' },
+          { id: 's2', inspectionId: SENT_ID, descricao: 'Resposta do checklist', createdAt: '2026-10-01T10:00:00.000Z' },
+        ],
+      });
+
+      await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Motivo');
+
+      expect(useAppStore.getState().syncQueue.map((q) => q.id)).toEqual(['s2']);
+    });
+
+    it('ainda não chama a API: o backend não tem endpoint de cancelar', async () => {
+      await useAppStore.getState().cancelInspection(ASSIGNED_ID, 'Motivo');
+
+      for (const fn of apiMocks()) expect(fn).not.toHaveBeenCalled();
     });
   });
 
