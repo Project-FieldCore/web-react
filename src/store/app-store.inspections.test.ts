@@ -100,9 +100,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       const created = useAppStore.getState().inspections[0];
       expect(created).toMatchObject({
         id: (result as { id: string }).id,
-        clienteId: 'cli-1',
-        localId: 'loc-1',
-        tecnicoId: 'tec-1',
+        clienteId: CONTRACT_IDS.client,
+        localId: CONTRACT_IDS.site,
+        tecnicoId: DEMO_TECHNICIAN.id,
         modeloId: 'mod-1',
         modeloVersao: 3,
         prioridade: 'ALTA',
@@ -115,9 +115,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     });
 
     it('o equipamento escolhido fica na inspeção local', async () => {
-      await useAppStore.getState().scheduleInspection({ ...input, equipamentoId: 'eq-1' });
+      await useAppStore.getState().scheduleInspection({ ...input, equipamentoId: CONTRACT_IDS.equipment });
 
-      expect(useAppStore.getState().inspections[0].equipamentoId).toBe('eq-1');
+      expect(useAppStore.getState().inspections[0].equipamentoId).toBe(CONTRACT_IDS.equipment);
     });
 
     it('registra o agendamento no histórico', async () => {
@@ -142,7 +142,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
 
     it('cliente inativo fica fora de novos agendamentos e não chama a API', async () => {
       const initialClients = useAppStore.getState().clients;
-      useAppStore.setState({ clients: [{ id: 'cli-1', nome: 'Acme', ativo: false, version: 1 }] });
+      useAppStore.setState({
+        clients: [{ id: CONTRACT_IDS.client, nome: 'Acme', ativo: false, version: 1 }],
+      });
       try {
         const result = await useAppStore.getState().scheduleInspection(input);
 
@@ -155,7 +157,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
 
     it('local inativo fica fora de novos agendamentos e não chama a API', async () => {
       const initialLocations = useAppStore.getState().locations;
-      useAppStore.setState({ locations: [{ id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', ativo: false, version: 1 }] });
+      useAppStore.setState({
+        locations: [{ id: CONTRACT_IDS.site, clienteId: CONTRACT_IDS.client, nome: 'Matriz', ativo: false, version: 1 }],
+      });
       try {
         const result = await useAppStore.getState().scheduleInspection(input);
 
