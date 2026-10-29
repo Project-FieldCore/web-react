@@ -42,6 +42,7 @@ import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
 import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
 import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
@@ -939,9 +940,9 @@ export const useAppStore = create<AppState>()(
       if (!tech || tech.status !== 'ATIVO') {
         return { ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' };
       }
-      if (!input.clienteId || !input.localId || !input.dataPrevista) {
-        return { ok: false, error: 'Cliente, local e data prevista são obrigatórios (RN-025).' };
-      }
+      // RN-025 + o que a API exige: data futura e orientações até 2000 caracteres.
+      const invalid = validateSchedule(input);
+      if (invalid) return { ok: false, error: invalid };
       // Cliente inativo fica fora de novos agendamentos (a API também valida).
       const client = get().clients.find((c) => c.id === input.clienteId);
       if (client && !client.ativo) {
@@ -953,10 +954,16 @@ export const useAppStore = create<AppState>()(
       }
 
       let inspection: Inspection;
-      try {
-        inspection = await inspectionsApi.scheduleInspection(input);
-      } catch (error) {
-        return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+      if (isLocalOnlySchedule(model)) {
+        // O modelo ainda não tem o id da versão publicada na API (que o agendamento exige):
+        // a inspeção nasce ATRIBUÍDA só na tela, sem chamar a API.
+        inspection = buildLocalInspection(input, model, newId('INS'));
+      } else {
+        try {
+          inspection = await inspectionsApi.scheduleInspection(input, model.templateVersionId!, model.version);
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+        }
       }
       set((s) => ({ inspections: [inspection, ...s.inspections] }));
       pushAudit('AGENDOU', 'Inspeção', inspection.id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);

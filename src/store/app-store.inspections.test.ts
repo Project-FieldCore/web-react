@@ -54,23 +54,66 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
   });
 
   describe('scheduleInspection', () => {
+    // Data sempre no futuro (a API e o store recusam data passada).
+    const inDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
     const input = {
       modeloId: 'mod-1',
       clienteId: 'cli-1',
       localId: 'loc-1',
       tecnicoId: 'tec-1',
       prioridade: 'ALTA' as const,
-      dataPrevista: '2026-11-01T10:00:00.000Z',
+      dataPrevista: inDays(7),
     };
+    /** Liga o modelo publicado a uma versão na API (hoje a API ainda não expõe esse id). */
+    const linkModelToApiVersion = () =>
+      useAppStore.setState((s) => ({
+        models: s.models.map((m) => (m.id === 'mod-1' ? { ...m, templateVersionId: 'ver-api-1' } : m)),
+      }));
 
-    it('agenda via API e guarda a inspeção devolvida (id do servidor)', async () => {
+    it('modelo com versão na API: agenda via API e guarda a inspeção devolvida (id do servidor)', async () => {
+      linkModelToApiVersion();
       const created: Inspection = { ...input, id: 'srv-1', modeloVersao: 3, status: 'ATRIBUIDA', answers: {}, nonConformities: {} };
       mocked(inspectionsApi.scheduleInspection).mockResolvedValue(created);
 
       const result = await useAppStore.getState().scheduleInspection(input);
 
       expect(result).toEqual({ ok: true, id: 'srv-1' });
+      expect(inspectionsApi.scheduleInspection).toHaveBeenCalledWith(input, 'ver-api-1', 3);
       expect(useAppStore.getState().inspections[0]).toEqual(created);
+    });
+
+    it('modelo sem versão na API: agenda só na tela, ATRIBUÍDA, sem chamar a API', async () => {
+      const result = await useAppStore.getState().scheduleInspection({ ...input, orientacoes: '  Levar EPI  ' });
+
+      expect(result.ok).toBe(true);
+      expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+      const created = useAppStore.getState().inspections[0];
+      expect(created).toMatchObject({
+        id: (result as { id: string }).id,
+        clienteId: 'cli-1',
+        localId: 'loc-1',
+        tecnicoId: 'tec-1',
+        modeloId: 'mod-1',
+        modeloVersao: 3,
+        prioridade: 'ALTA',
+        status: 'ATRIBUIDA',
+        orientacoes: 'Levar EPI',
+        answers: {},
+        nonConformities: {},
+      });
+      expect(created.id).toMatch(/^INS-\d{4}$/);
+    });
+
+    it('o equipamento escolhido fica na inspeção local', async () => {
+      await useAppStore.getState().scheduleInspection({ ...input, equipamentoId: 'eq-1' });
+
+      expect(useAppStore.getState().inspections[0].equipamentoId).toBe('eq-1');
+    });
+
+    it('registra o agendamento no histórico', async () => {
+      await useAppStore.getState().scheduleInspection(input);
+
+      expect(useAppStore.getState().auditEvents[0]).toMatchObject({ action: 'AGENDOU', entity: 'Inspeção' });
     });
 
     it('RN-024: modelo em rascunho não chama a API', async () => {
@@ -116,17 +159,46 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     it('RN-025: data prevista obrigatória', async () => {
       const result = await useAppStore.getState().scheduleInspection({ ...input, dataPrevista: '' });
 
-      expect(result.ok).toBe(false);
+      expect(result).toEqual({ ok: false, error: 'Cliente, local e data prevista são obrigatórios (RN-025).' });
       expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
     });
 
-    it('propaga ApiError e não altera a lista', async () => {
+    it('data no passado é recusada, sem chamar a API nem criar a inspeção', async () => {
+      linkModelToApiVersion();
+      const before = useAppStore.getState().inspections.length;
+
+      const result = await useAppStore.getState().scheduleInspection({ ...input, dataPrevista: new Date(Date.now() - 60_000).toISOString() });
+
+      expect(result).toEqual({ ok: false, error: 'A data prevista precisa estar no futuro.' });
+      expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+      expect(useAppStore.getState().inspections).toHaveLength(before);
+    });
+
+    it('orientações acima de 2000 caracteres são recusadas', async () => {
+      const result = await useAppStore.getState().scheduleInspection({ ...input, orientacoes: 'x'.repeat(2001) });
+
+      expect(result).toEqual({ ok: false, error: 'As orientações devem ter no máximo 2000 caracteres.' });
+    });
+
+    it('propaga ApiError (ex.: técnico inativo no servidor) e não altera a lista', async () => {
+      linkModelToApiVersion();
       mocked(inspectionsApi.scheduleInspection).mockRejectedValue(new ApiError('Técnico indisponível.', 409));
       const before = useAppStore.getState().inspections.length;
 
       const result = await useAppStore.getState().scheduleInspection(input);
 
       expect(result).toEqual({ ok: false, error: 'Técnico indisponível.' });
+      expect(useAppStore.getState().inspections).toHaveLength(before);
+    });
+
+    it('erro de rede ao agendar na API não cria a inspeção', async () => {
+      linkModelToApiVersion();
+      mocked(inspectionsApi.scheduleInspection).mockRejectedValue(new NetworkError('Sem conexão.'));
+      const before = useAppStore.getState().inspections.length;
+
+      const result = await useAppStore.getState().scheduleInspection(input);
+
+      expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
       expect(useAppStore.getState().inspections).toHaveLength(before);
     });
   });

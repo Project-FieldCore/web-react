@@ -75,6 +75,12 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
     'Seleção única exige alternativas diferentes entre si, e os outros tipos de resposta não aceitam alternativas.',
   ITEM_ORDER_ALREADY_EXISTS: 'Já existe um item nessa posição da seção. Recarregue a lista e tente de novo.',
   TEMPLATE_ITEM_NOT_FOUND: 'Item não encontrado. Ele pode ter sido removido.',
+  TEMPLATE_VERSION_NOT_PUBLISHED: 'Este modelo não tem uma versão publicada disponível para novas inspeções (RN-024).',
+  SITE_CLIENT_MISMATCH: 'O local escolhido não pertence ao cliente selecionado.',
+  TECHNICIAN_NOT_FOUND: 'Técnico não encontrado. Ele pode ter sido removido.',
+  TECHNICIAN_ROLE_INVALID: 'O usuário escolhido não é um técnico.',
+  TECHNICIAN_NOT_ACTIVE: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).',
+  INSPECTION_NOT_ASSIGNABLE: 'Esta inspeção já não pode ser reatribuída no estado atual.',
   INVALID_SORT: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
   // 409 genérico (violação de integridade no banco, sem código específico).
   CONFLICT: 'Não foi possível salvar: os dados conflitam com um registro existente.',

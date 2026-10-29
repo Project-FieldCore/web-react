@@ -70,6 +70,12 @@ export interface InspectionModel {
    * Ausente nos modelos locais (dados de exemplo), que não existem na API.
    */
   lockVersion?: number;
+  /**
+   * Id da versão publicada na API (`templateVersionId`), que o agendamento exige.
+   * A API ainda não expõe esse id ao front (não há endpoint de publicar nem de
+   * listar versões); modelos sem ele são agendados só na tela.
+   */
+  templateVersionId?: string;
   sections: ModelSection[];
   updatedAt: string;
   /**
