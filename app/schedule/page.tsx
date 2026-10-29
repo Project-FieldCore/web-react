@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { PRIORITY_LABEL, formatDateTime, summarizeInstructions } from '@/lib/inspection-display';
 import {
   MAX_INSTRUCTIONS,
   isLocalOnlySchedule,
@@ -13,7 +14,6 @@ import {
 } from '@/lib/schedule-rules';
 import type { Priority } from '@/types';
 
-const PRIORITY_LABEL: Record<Priority, string> = { ALTA: 'Alta', MEDIA: 'Média', BAIXA: 'Baixa' };
 
 /**
  * UC-06 — Agendar e atribuir inspeção.
@@ -283,7 +283,8 @@ export default function SchedulePage() {
               <SummaryRow label="Equipamento" value={selectedEquipment?.nome ?? (localId ? 'Nenhum específico' : undefined)} />
               <SummaryRow label="Técnico" value={selectedTech?.nome} />
               <SummaryRow label="Prioridade" value={PRIORITY_LABEL[prioridade]} />
-              <SummaryRow label="Data prevista" value={dataPrevista ? new Date(dataPrevista).toLocaleString('pt-BR') : undefined} />
+              <SummaryRow label="Data prevista" value={dataPrevista ? formatDateTime(dataPrevista) : undefined} />
+              <SummaryRow label="Orientações" value={summarizeInstructions(orientacoes) ?? undefined} emptyLabel="Nenhuma" />
             </dl>
           </div>
 
@@ -341,11 +342,13 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value?: string }) {
+function SummaryRow({ label, value, emptyLabel = 'Pendente' }: { label: string; value?: string; emptyLabel?: string }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <dt className="text-slate-400 font-semibold shrink-0">{label}</dt>
-      <dd className={`text-right font-semibold ${value ? 'text-navy-900' : 'text-slate-300 italic'}`}>{value ?? 'Pendente'}</dd>
+      <dd className={`text-right font-semibold min-w-0 break-words whitespace-pre-line ${value ? 'text-navy-900' : 'text-slate-300 italic'}`}>
+        {value ?? emptyLabel}
+      </dd>
     </div>
   );
 }

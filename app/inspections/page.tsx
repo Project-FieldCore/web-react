@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState } from '@/components/States';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { formatDateTime } from '@/lib/inspection-display';
 import type { InspectionStatus } from '@/types';
 
 const FILTERS: { key: 'TODAS' | InspectionStatus; label: string }[] = [
@@ -102,7 +103,7 @@ export default function InspectionsListPage() {
                 <td className="px-5 py-3 text-slate-600 truncate">{techName(i.tecnicoId)}</td>
                 <td className="px-5 py-3"><PriorityTag priority={i.prioridade} /></td>
                 <td className="px-5 py-3"><InspectionStatusBadge status={i.status} /></td>
-                <td className="px-5 py-3 text-slate-500 font-mono text-xs">{new Date(i.dataPrevista).toLocaleDateString('pt-BR')}</td>
+                <td className="px-5 py-3 text-slate-500 font-mono text-xs">{formatDateTime(i.dataPrevista)}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
@@ -127,7 +128,7 @@ export default function InspectionsListPage() {
                 <PriorityTag priority={i.prioridade} />
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-mono text-slate-500">{new Date(i.dataPrevista).toLocaleDateString('pt-BR')}</span>
+                <span className="text-xs font-mono text-slate-500">{formatDateTime(i.dataPrevista)}</span>
                 <span className="text-xs font-bold text-navy-700 whitespace-nowrap">
                   {i.status === 'ENVIADA' || i.status === 'EM_REVISAO' ? 'Revisar →' : 'Ver →'}
                 </span>

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { InspectionInstructions } from '@/components/InspectionInstructions';
+import { formatDateTime } from '@/lib/inspection-display';
 import { ErrorState, InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 
@@ -91,7 +93,8 @@ export default function InspectionReviewPage() {
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Técnico</span>{tech?.nome}</div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Prioridade</span><PriorityTag priority={inspection.prioridade} /></div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Modelo</span>{model?.title} · v{inspection.modeloVersao}</div>
-        <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Data prevista</span>{new Date(inspection.dataPrevista).toLocaleString('pt-BR')}</div>
+        <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Data prevista</span>{formatDateTime(inspection.dataPrevista)}</div>
+        <InspectionInstructions text={inspection.orientacoes} />
       </div>
 
       {inspection.status === 'ENVIADA' && (

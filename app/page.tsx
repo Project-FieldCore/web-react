@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
+import { formatDateTime } from '@/lib/inspection-display';
 import type { Criticidade, InspectionStatus } from '@/types';
 
 const ACTIVE_STATUSES: InspectionStatus[] = ['ATRIBUIDA', 'EM_ANDAMENTO'];
@@ -267,7 +268,7 @@ export default function DashboardPage() {
                     <td className="px-5 py-3"><PriorityTag priority={i.prioridade} /></td>
                     <td className="px-5 py-3"><InspectionStatusBadge status={i.status} /></td>
                     <td className="px-5 py-3 text-slate-500 font-mono text-xs">
-                      {new Date(i.dataPrevista).toLocaleDateString('pt-BR')}
+                      {formatDateTime(i.dataPrevista)}
                     </td>
                   </tr>
                 ))}
@@ -293,7 +294,7 @@ export default function DashboardPage() {
                     <PriorityTag priority={i.prioridade} />
                   </div>
                   <div className="text-xs font-mono text-slate-500">
-                    {new Date(i.dataPrevista).toLocaleDateString('pt-BR')}
+                    {formatDateTime(i.dataPrevista)}
                   </div>
                 </Link>
               ))}
