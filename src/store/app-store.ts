@@ -42,6 +42,8 @@ import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
+import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
 import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
 import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
@@ -174,6 +176,11 @@ interface AppState {
   approveInspection: (inspectionId: string, comentario?: string) => Promise<Result>;
   rejectInspection: (inspectionId: string, motivo: string) => Promise<Result>;
   returnForCorrection: (inspectionId: string, comentario: string) => Promise<Result>;
+  /**
+   * Cancela com justificativa (RN-029); aprovada não cancela pelo fluxo comum (RN-030).
+   * Registra usuário, data e justificativa. Ainda só na tela: o backend não tem endpoint de cancelar.
+   */
+  cancelInspection: (inspectionId: string, justificativa: string) => Promise<Result>;
 
   // --- não conformidades — integradas à API (#135) ---
   resolveNonConformity: (inspectionId: string, itemId: string, status: NonConformityStatus) => Promise<Result>;
@@ -939,9 +946,9 @@ export const useAppStore = create<AppState>()(
       if (!tech || tech.status !== 'ATIVO') {
         return { ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' };
       }
-      if (!input.clienteId || !input.localId || !input.dataPrevista) {
-        return { ok: false, error: 'Cliente, local e data prevista são obrigatórios (RN-025).' };
-      }
+      // RN-025 + o que a API exige: data futura e orientações até 2000 caracteres.
+      const invalid = validateSchedule(input);
+      if (invalid) return { ok: false, error: invalid };
       // Cliente inativo fica fora de novos agendamentos (a API também valida).
       const client = get().clients.find((c) => c.id === input.clienteId);
       if (client && !client.ativo) {
@@ -953,14 +960,41 @@ export const useAppStore = create<AppState>()(
       }
 
       let inspection: Inspection;
-      try {
-        inspection = await inspectionsApi.scheduleInspection(input);
-      } catch (error) {
-        return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+      if (isLocalOnlySchedule(model)) {
+        // O modelo ainda não tem o id da versão publicada na API (que o agendamento exige):
+        // a inspeção nasce ATRIBUÍDA só na tela, sem chamar a API.
+        inspection = buildLocalInspection(input, model, newId('INS'));
+      } else {
+        try {
+          inspection = await inspectionsApi.scheduleInspection(input, model.templateVersionId!, model.version);
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível agendar a inspeção. Tente novamente.');
+        }
       }
       set((s) => ({ inspections: [inspection, ...s.inspections] }));
       pushAudit('AGENDOU', 'Inspeção', inspection.id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);
       return { ok: true, id: inspection.id };
+    },
+
+    cancelInspection: async (inspectionId, justificativa) => {
+      const inspection = get().inspections.find((i) => i.id === inspectionId);
+      if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
+      const blocked = cancelBlockedReason(inspection.status);
+      if (blocked) return { ok: false, error: blocked };
+      const invalid = validateJustification(justificativa);
+      if (invalid) return { ok: false, error: invalid };
+      const user = get().currentUser;
+      if (!user) return { ok: false, error: 'Sua sessão expirou. Entre novamente para cancelar a inspeção.' };
+
+      // Quando o backend tiver o endpoint de cancelar, a chamada entra aqui (antes de gravar na tela).
+      const cancelamento = buildCancellation({ id: user.id, nome: user.nome }, justificativa);
+      set((s) => ({
+        inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, status: 'CANCELADA', cancelamento } : i)),
+        // Nada mais a sincronizar de uma inspeção cancelada.
+        syncQueue: s.syncQueue.filter((q) => q.inspectionId !== inspectionId),
+      }));
+      pushAudit('CANCELOU', 'Inspeção', inspectionId, cancelamento.justificativa);
+      return { ok: true };
     },
 
     // Revisão (UC-16/UC-17): a API devolve a inspeção atualizada (status, review,

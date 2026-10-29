@@ -70,6 +70,12 @@ export interface InspectionModel {
    * Ausente nos modelos locais (dados de exemplo), que não existem na API.
    */
   lockVersion?: number;
+  /**
+   * Id da versão publicada na API (`templateVersionId`), que o agendamento exige.
+   * A API ainda não expõe esse id ao front (não há endpoint de publicar nem de
+   * listar versões); modelos sem ele são agendados só na tela.
+   */
+  templateVersionId?: string;
   sections: ModelSection[];
   updatedAt: string;
   /**
@@ -187,6 +193,15 @@ export interface ReviewInfo {
   decidedAt?: string;
 }
 
+/** Quem cancelou a inspeção, quando e por quê (RN-029). */
+export interface Cancellation {
+  porNome: string;
+  porId?: string;
+  /** Data e hora do cancelamento (ISO). */
+  em: string;
+  justificativa: string;
+}
+
 /** Registro de devolução da inspeção para correção do técnico (feedback do gestor). */
 export interface CorrectionFeedback {
   supervisorNome: string;
@@ -214,6 +229,8 @@ export interface Inspection {
   qrConfirmadoEm?: string;
   /** Histórico de devoluções para correção (mais recente por último). */
   correcoes?: CorrectionFeedback[];
+  /** Preenchido quando a inspeção é cancelada (RN-029). */
+  cancelamento?: Cancellation;
 }
 
 /**
