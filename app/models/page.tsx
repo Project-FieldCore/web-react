@@ -119,6 +119,7 @@ export default function ModelsPage() {
                 <div className="mt-auto flex items-center gap-2 flex-wrap">
                   <Tag>{m.category}</Tag>
                   {m.status !== 'RASCUNHO' && <Tag>v{m.version}</Tag>}
+                  {m.editingNewVersion && <Tag>Nova versão em edição</Tag>}
                   <Tag>{m.sections.length} seç{m.sections.length === 1 ? 'ão' : 'ões'}</Tag>
                   <Tag>{itemCount} it{itemCount === 1 ? 'em' : 'ens'}</Tag>
                 </div>
