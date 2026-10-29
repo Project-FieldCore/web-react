@@ -41,6 +41,7 @@ import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
+import { blockingIssues, validateModel } from '@/lib/model-validation';
 import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
@@ -873,12 +874,9 @@ export const useAppStore = create<AppState>()(
     publishModel: async (modelId) => {
       const model = get().models.find((m) => m.id === modelId);
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
-      if (!model.title.trim()) return { ok: false, error: 'Informe um título para o modelo.' };
-      if (model.sections.length === 0) return { ok: false, error: 'Adicione ao menos uma seção com itens (RN-015).' };
-      const hasItem = model.sections.some((sec) => sec.items.length > 0);
-      if (!hasItem) return { ok: false, error: 'Adicione ao menos um item válido antes de publicar (RN-015).' };
-      const missingType = model.sections.some((sec) => sec.items.some((it) => !it.type));
-      if (missingType) return { ok: false, error: 'Todo item precisa de um tipo de resposta (RN-016).' };
+      // Mesma validação da prévia e do botão Publicar (RN-015/016 + o que a API exige).
+      const [blocking] = blockingIssues(validateModel(model));
+      if (blocking) return { ok: false, error: blocking.message };
 
       // A API recebe o rascunho completo e só então publica — quem decide a
       // nova versão (RN-020) é ela; usamos o que voltar.

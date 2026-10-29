@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import { MOCK_MODELS } from '@/data/mock-data';
+import { blockingIssues, validateModel } from '@/lib/model-validation';
 import type { InspectionModel } from '@/types';
 
 vi.mock('@/lib/models-api', () => ({
@@ -506,6 +507,91 @@ describe('useAppStore construtor de modelos — #134', () => {
           expect(typeof item.evidenceRequiredOnFailure).toBe('boolean');
           expect(typeof item.observationRequiredOnFailure).toBe('boolean');
         }
+      }
+    });
+  });
+
+  describe('publishModel usa a mesma validação da prévia', () => {
+    const setItems = (items: InspectionModel['sections'][number]['items']) =>
+      useAppStore.setState((s) => ({
+        models: s.models.map((m) =>
+          m.id === DRAFT_ID ? { ...m, title: 'Rascunho válido', sections: [{ id: 'sec', title: 'Seção', displayOrder: 0, items }] } : m
+        ),
+      }));
+    const baseItem = { id: 'i1', title: 'Item', type: 'CONFORMITY' as const, required: false, evidenceRequiredOnFailure: false, observationRequiredOnFailure: false };
+
+    it('item sem título bloqueia a publicação, sem chamar a API', async () => {
+      setItems([{ ...baseItem, title: '  ' }]);
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: false, error: 'O item 1 da seção "Seção" está sem título.' });
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+      expect(modelsApi.publishModel).not.toHaveBeenCalled();
+    });
+
+    it('seleção única sem alternativas bloqueia a publicação', async () => {
+      setItems([{ ...baseItem, type: 'SINGLE_CHOICE', options: [] }]);
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: false, error: 'O item "Item" é de seleção única e precisa de alternativas.' });
+      expect(modelsApi.publishModel).not.toHaveBeenCalled();
+    });
+
+    it('seleção única com alternativas repetidas bloqueia a publicação', async () => {
+      setItems([{ ...baseItem, type: 'SINGLE_CHOICE', options: ['A', 'A'] }]);
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: false, error: 'O item "Item" tem alternativas repetidas.' });
+    });
+
+    it('só avisos (seção vazia, uma alternativa) não impedem publicar', async () => {
+      useAppStore.setState((s) => ({
+        models: s.models.map((m) =>
+          m.id === DRAFT_ID
+            ? {
+                ...m,
+                title: 'Rascunho válido',
+                sections: [
+                  { id: 'a', title: 'Com item', displayOrder: 0, items: [{ ...baseItem, type: 'SINGLE_CHOICE' as const, options: ['Única'] }] },
+                  { id: 'b', title: 'Vazia', displayOrder: 1, items: [] },
+                ],
+              }
+            : m
+        ),
+      }));
+      const current = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!;
+      mocked(modelsApi.saveModel).mockResolvedValue(current);
+      mocked(modelsApi.publishModel).mockResolvedValue({ ...current, status: 'PUBLICADO', version: 1 });
+
+      const result = await useAppStore.getState().publishModel(DRAFT_ID);
+
+      expect(result).toEqual({ ok: true });
+      expect(modelsApi.publishModel).toHaveBeenCalledWith(DRAFT_ID);
+    });
+
+    it('as mensagens de RN-015/016 continuam as mesmas', async () => {
+      useAppStore.setState((s) => ({ models: s.models.map((m) => (m.id === DRAFT_ID ? { ...m, title: '  ', sections: [] } : m)) }));
+      expect(await useAppStore.getState().publishModel(DRAFT_ID)).toEqual({ ok: false, error: 'Informe um título para o modelo.' });
+
+      useAppStore.setState((s) => ({ models: s.models.map((m) => (m.id === DRAFT_ID ? { ...m, title: 'T', sections: [] } : m)) }));
+      expect(await useAppStore.getState().publishModel(DRAFT_ID)).toEqual({ ok: false, error: 'Adicione ao menos uma seção com itens (RN-015).' });
+
+      setItems([]);
+      expect(await useAppStore.getState().publishModel(DRAFT_ID)).toEqual({ ok: false, error: 'Adicione ao menos um item válido antes de publicar (RN-015).' });
+
+      setItems([{ ...baseItem, type: undefined as never }]);
+      expect(await useAppStore.getState().publishModel(DRAFT_ID)).toEqual({ ok: false, error: 'Todo item precisa de um tipo de resposta (RN-016).' });
+    });
+
+    it('os modelos de exemplo publicados passam na validação (sem problemas que bloqueiam)', () => {
+      const published = useAppStore.getState().models.filter((m) => m.status === 'PUBLICADO');
+
+      expect(published.length).toBeGreaterThan(0);
+      for (const model of published) {
+        expect(blockingIssues(validateModel(model))).toEqual([]);
       }
     });
   });

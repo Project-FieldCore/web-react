@@ -8,6 +8,8 @@ import { ErrorState, InlineError, LoadingState } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import { supportsFailureRules } from '@/lib/item-rules';
+import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { ModelPreview } from '@/components/checklist/ModelPreview';
 import type { ItemType } from '@/types';
 
 const ITEM_TYPES: { value: ItemType; label: string }[] = [
@@ -137,7 +139,10 @@ export default function ModelBuilderPage() {
   const titleOk = model.title.trim().length > 0;
   const hasSection = model.sections.length > 0;
   const hasItem = model.sections.some((s) => s.items.length > 0);
-  const canPublish = titleOk && hasSection && hasItem;
+  // Mesma validação da prévia e de publishModel (RN-015/016 + o que a API exige).
+  const issues = validateModel(model);
+  const blocking = blockingIssues(issues);
+  const canPublish = blocking.length === 0;
 
   async function handlePublish() {
     const wasPublished = model!.status === 'PUBLICADO';
@@ -408,7 +413,7 @@ export default function ModelBuilderPage() {
 
           <div className="flex flex-col gap-2">
             <button onClick={() => setShowPreview(true)} className="w-full bg-white border border-slate-300 rounded-xl py-3 font-bold text-navy-800">
-              Ver prévia do checklist
+              Ver prévia do checklist{issues.length > 0 ? ` (${issues.length})` : ''}
             </button>
             <button
               onClick={handleSave}
@@ -428,28 +433,7 @@ export default function ModelBuilderPage() {
         </div>
       </div>
 
-      {showPreview && (
-        <div className="fixed inset-0 bg-navy-900/50 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-y-auto p-6">
-            <h3 className="font-extrabold text-navy-900 mb-1">{model.title}</h3>
-            <p className="text-sm text-slate-500 mb-4">Prévia de como o técnico verá no aplicativo</p>
-            {orderedSections.map((sec) => (
-              <div key={sec.id} className="mb-4">
-                <div className="text-xs font-extrabold text-navy-700 uppercase mb-2">{sec.title}</div>
-                {sec.items.map((it) => (
-                  <div key={it.id} className="border border-slate-200 rounded-lg p-3 mb-2 text-sm">
-                    <div className="font-semibold text-navy-900">{it.title}</div>
-                    <div className="text-xs text-slate-400 mt-1">{ITEM_TYPES.find((t) => t.value === it.type)?.label}{it.required ? ' · Obrigatório' : ''}</div>
-                  </div>
-                ))}
-              </div>
-            ))}
-            <button onClick={() => setShowPreview(false)} className="w-full bg-navy-900 text-white rounded-xl py-2.5 font-bold mt-2">
-              Fechar
-            </button>
-          </div>
-        </div>
-      )}
+      {showPreview && <ModelPreview model={model} onClose={() => setShowPreview(false)} />}
     </div>
   );
 }
