@@ -60,8 +60,9 @@ export async function refresh(refreshToken: string): Promise<LoginResponse> {
 }
 
 /**
- * POST /v1/auth/logout { refreshToken } -> 200 (sem corpo). Exige o access
- * token no header (a rota não é pública) e revoga o refresh token.
+ * POST /v1/auth/logout { refreshToken } -> 204 No Content (contrato atual;
+ * `http.ts` também aceita 200 sem corpo). Exige o access token no header
+ * (a rota não é pública) e revoga o refresh token.
  */
 export function logout(refreshToken: string): Promise<void> {
   return http.post<void>('/auth/logout', { refreshToken }, { skipRefresh: true });
