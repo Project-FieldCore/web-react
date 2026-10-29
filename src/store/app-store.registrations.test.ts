@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import type { Client, Location, User } from '@/types';
+import { CONTRACT_IDS } from '@/data/contract-mocks';
 
 vi.mock('@/lib/clients-api', () => ({
   listClients: vi.fn(),
@@ -30,7 +31,8 @@ function mocked<T extends (...args: never[]) => unknown>(fn: T) {
   return fn as unknown as ReturnType<typeof vi.fn>;
 }
 
-const EXISTING_CLIENT_ID = 'cli-1';
+/** ID do cliente seed do mock OpenAPI (store inicial). */
+const EXISTING_CLIENT_ID = CONTRACT_IDS.client;
 
 const initialUsersForMerge = useAppStore.getState().users;
 const initialClientsForMerge = useAppStore.getState().clients;

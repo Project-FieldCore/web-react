@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './app-store';
 import { ApiError, NetworkError } from '@/lib/http';
 import { MOCK_INSPECTIONS, MOCK_MODELS, MOCK_USERS } from '@/data/mock-data';
-import type { Inspection } from '@/types';
+import { CONTRACT_IDS } from '@/data/contract-mocks';
+import type { Inspection, User } from '@/types';
+
+/** Fixture local de teste (não está no mock OpenAPI — contrato só traz SUPERVISOR). */
+const DEMO_TECHNICIAN: User = {
+  id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  nome: 'Demo Technician',
+  email: 'tec.demo@example.com',
+  role: 'TECHNICIAN',
+  status: 'ATIVO',
+};
 
 vi.mock('@/lib/inspections-api', () => ({
   scheduleInspection: vi.fn(),
@@ -46,7 +56,7 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     useAppStore.setState({
       inspections: structuredClone(MOCK_INSPECTIONS),
       models: structuredClone(MOCK_MODELS),
-      users: structuredClone(MOCK_USERS),
+      users: [...structuredClone(MOCK_USERS), structuredClone(DEMO_TECHNICIAN)],
       syncQueue: [],
       syncing: false,
       lastSyncAt: null,
@@ -58,9 +68,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     const inDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
     const input = {
       modeloId: 'mod-1',
-      clienteId: 'cli-1',
-      localId: 'loc-1',
-      tecnicoId: 'tec-1',
+      clienteId: CONTRACT_IDS.client,
+      localId: CONTRACT_IDS.site,
+      tecnicoId: DEMO_TECHNICIAN.id,
       prioridade: 'ALTA' as const,
       dataPrevista: inDays(7),
     };
@@ -90,9 +100,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       const created = useAppStore.getState().inspections[0];
       expect(created).toMatchObject({
         id: (result as { id: string }).id,
-        clienteId: 'cli-1',
-        localId: 'loc-1',
-        tecnicoId: 'tec-1',
+        clienteId: CONTRACT_IDS.client,
+        localId: CONTRACT_IDS.site,
+        tecnicoId: DEMO_TECHNICIAN.id,
         modeloId: 'mod-1',
         modeloVersao: 3,
         prioridade: 'ALTA',
@@ -105,9 +115,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     });
 
     it('o equipamento escolhido fica na inspeção local', async () => {
-      await useAppStore.getState().scheduleInspection({ ...input, equipamentoId: 'eq-1' });
+      await useAppStore.getState().scheduleInspection({ ...input, equipamentoId: CONTRACT_IDS.equipment });
 
-      expect(useAppStore.getState().inspections[0].equipamentoId).toBe('eq-1');
+      expect(useAppStore.getState().inspections[0].equipamentoId).toBe(CONTRACT_IDS.equipment);
     });
 
     it('registra o agendamento no histórico', async () => {
@@ -132,7 +142,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
 
     it('cliente inativo fica fora de novos agendamentos e não chama a API', async () => {
       const initialClients = useAppStore.getState().clients;
-      useAppStore.setState({ clients: [{ id: 'cli-1', nome: 'Acme', ativo: false, version: 1 }] });
+      useAppStore.setState({
+        clients: [{ id: CONTRACT_IDS.client, nome: 'Acme', ativo: false, version: 1 }],
+      });
       try {
         const result = await useAppStore.getState().scheduleInspection(input);
 
@@ -145,7 +157,9 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
 
     it('local inativo fica fora de novos agendamentos e não chama a API', async () => {
       const initialLocations = useAppStore.getState().locations;
-      useAppStore.setState({ locations: [{ id: 'loc-1', clienteId: 'cli-1', nome: 'Matriz', ativo: false, version: 1 }] });
+      useAppStore.setState({
+        locations: [{ id: CONTRACT_IDS.site, clienteId: CONTRACT_IDS.client, nome: 'Matriz', ativo: false, version: 1 }],
+      });
       try {
         const result = await useAppStore.getState().scheduleInspection(input);
 
