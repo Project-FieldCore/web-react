@@ -40,6 +40,8 @@ import * as locationsApi from '@/lib/locations-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
+import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
+import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
 import { ApiError, NetworkError } from '@/lib/http';
 import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
@@ -141,6 +143,8 @@ interface AppState {
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
   addSection: (modelId: string) => void;
   removeSection: (modelId: string, sectionId: string) => void;
+  /** RN-017: sobe/desce a seção e renumera a ordem (0, 1, 2…, única na versão). */
+  moveSection: (modelId: string, sectionId: string, direction: MoveDirection) => void;
   updateSectionTitle: (modelId: string, sectionId: string, title: string) => void;
   addItem: (modelId: string, sectionId: string) => void;
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
@@ -765,17 +769,39 @@ export const useAppStore = create<AppState>()(
     },
 
     addSection: (modelId) => {
-      const section: ModelSection = { id: newId('sec'), title: 'Nova seção', items: [] };
       set((s) => ({
-        models: s.models.map((m) => (m.id === modelId ? { ...m, sections: [...m.sections, section] } : m)),
+        models: s.models.map((m) => {
+          if (m.id !== modelId) return m;
+          // A nova seção entra no fim, com a próxima ordem (RN-017).
+          const section: ModelSection = {
+            id: newId('sec'),
+            title: 'Nova seção',
+            displayOrder: nextDisplayOrder(m.sections),
+            items: [],
+          };
+          return { ...m, sections: [...m.sections, section] };
+        }),
       }));
     },
 
     removeSection: (modelId, sectionId) => {
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId ? { ...m, sections: m.sections.filter((sec) => sec.id !== sectionId) } : m
+          m.id === modelId
+            ? { ...m, sections: normalizeSectionOrder(m.sections.filter((sec) => sec.id !== sectionId)) }
+            : m
         ),
+      }));
+    },
+
+    moveSection: (modelId, sectionId, direction) => {
+      set((s) => ({
+        models: s.models.map((m) => {
+          if (m.id !== modelId) return m;
+          const sections = moveSectionInList(m.sections, sectionId, direction);
+          // Primeira/última seção (ou id desconhecido): nada muda.
+          return sections === m.sections ? m : { ...m, sections, updatedAt: new Date().toISOString() };
+        }),
       }));
     },
 
@@ -795,7 +821,8 @@ export const useAppStore = create<AppState>()(
         title: 'Novo item',
         type: 'CONFORMITY',
         required: false,
-        needsEvidenceOnNok: false,
+        evidenceRequiredOnFailure: false,
+        observationRequiredOnFailure: false,
       };
       set((s) => ({
         models: s.models.map((m) =>
@@ -832,7 +859,7 @@ export const useAppStore = create<AppState>()(
                 ...m,
                 sections: m.sections.map((sec) =>
                   sec.id === sectionId
-                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }
+                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? applyItemPatch(it, patch) : it)) }
                     : sec
                 ),
               }
@@ -992,7 +1019,8 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    // RN-039/040: todo item obrigatório precisa de resposta; não conformidade crítica exige evidência.
+    // RN-039/040: todo item obrigatório precisa de resposta; não conformidade crítica exige evidência
+    // e, quando o item pede, observação (PBI-0021.1).
     submitInspection: async (inspectionId) => {
       const inspection = get().inspections.find((i) => i.id === inspectionId);
       if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
@@ -1005,11 +1033,12 @@ export const useAppStore = create<AppState>()(
           if (item.required && !isAnswerFilled(answer)) {
             return { ok: false, error: `Responda o item obrigatório "${item.title}" antes de enviar.` };
           }
-          if (item.needsEvidenceOnNok && answer?.conformity === 'NAO_CONFORME') {
-            const nc = inspection.nonConformities[item.id];
-            if (!nc || nc.evidenceCount === 0) {
-              return { ok: false, error: `O item "${item.title}" é crítico e exige evidência para a não conformidade registrada (RN-039).` };
-            }
+          // Regras "na falha" (PBI-0021.1): observação e evidência obrigatórias quando não conforme.
+          if (missingObservation(item, answer)) {
+            return { ok: false, error: `O item "${item.title}" exige uma observação quando não conforme. Preencha antes de enviar.` };
+          }
+          if (answer?.conformity === 'NAO_CONFORME' && missingEvidence(item, inspection.nonConformities[item.id]?.evidenceCount)) {
+            return { ok: false, error: `O item "${item.title}" é crítico e exige evidência para a não conformidade registrada (RN-039).` };
           }
         }
       }

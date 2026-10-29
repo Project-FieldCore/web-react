@@ -67,6 +67,14 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   TEMPLATE_TITLE_ALREADY_EXISTS: 'Já existe um modelo com esse título. Escolha outro título.',
   TEMPLATE_NOT_EDITABLE: 'Só modelos em rascunho podem ser editados.',
   INSPECTION_TEMPLATE_NOT_FOUND: 'Modelo não encontrado. Ele pode ter sido removido.',
+  SECTION_ORDER_ALREADY_EXISTS: 'Já existe uma seção nessa posição. Recarregue a lista e tente de novo.',
+  INVALID_SECTION_ORDER: 'Ordem de seções inválida: cada seção precisa de uma posição diferente.',
+  TEMPLATE_SECTION_NOT_FOUND: 'Seção não encontrada. Ela pode ter sido removida.',
+  TEMPLATE_VERSION_NOT_FOUND: 'Versão do modelo não encontrada.',
+  INVALID_RESPONSE_OPTIONS:
+    'Seleção única exige alternativas diferentes entre si, e os outros tipos de resposta não aceitam alternativas.',
+  ITEM_ORDER_ALREADY_EXISTS: 'Já existe um item nessa posição da seção. Recarregue a lista e tente de novo.',
+  TEMPLATE_ITEM_NOT_FOUND: 'Item não encontrado. Ele pode ter sido removido.',
   INVALID_SORT: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
   // 409 genérico (violação de integridade no banco, sem código específico).
   CONFLICT: 'Não foi possível salvar: os dados conflitam com um registro existente.',
