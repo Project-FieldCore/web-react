@@ -58,6 +58,13 @@ describe('auth-api login', () => {
     expect(JSON.parse(init.body)).toEqual({ refreshToken: 'refresh-xyz' });
   });
 
+  it('logout aceita 204 No Content (contrato atual da API)', async () => {
+    setAuthToken('jwt-abc');
+    global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(logout('refresh-xyz')).resolves.toBeUndefined();
+  });
+
   it('refresh envia o refreshToken sem o access token e mapeia o TokenResponse', async () => {
     setAuthToken('jwt-expirado');
     const fetchMock = vi.fn().mockResolvedValue(

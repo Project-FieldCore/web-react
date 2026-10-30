@@ -85,9 +85,9 @@ Métodos disponíveis: `http.get`, `http.post`, `http.put`, `http.patch`, `http.
    seção acima) limpa os dois. O `Shell.tsx` observa `currentUser` e
    redireciona para `/login` assim que ele vira `null`.
 
-**Pendente:** o contrato (`POST /v1/auth/login`, `/auth/logout`) vem da branch
-`feature/email-password-authentication` do `api-java`, ainda não mergeada.
-Validar de ponta a ponta com a API rodando (`JWT_SECRET` com 32+ caracteres).
+Logout responde **204 No Content** (api-java PBI-0007 / PR #119). O cliente
+aceita 204 e também 200 sem corpo via `http.ts`. Validar E2E com a API local
+(`NEXT_PUBLIC_API_BASE_URL`, `JWT_SECRET` com 32+ caracteres).
 
 ## Testes
 
