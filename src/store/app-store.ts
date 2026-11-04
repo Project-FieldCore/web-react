@@ -33,7 +33,6 @@ import {
   MOCK_MODELS,
   MOCK_USERS,
 } from '@/data/mock-data';
-import { DEMO_CREDENTIALS } from '@/data/demo-credentials';
 import { login as apiLogin, logout as apiLogout, refresh as apiRefresh } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
@@ -51,14 +50,18 @@ import { ApiError, NetworkError } from '@/lib/http';
 import { getRefreshToken, onRefresh, onUnauthorized, setAuthToken, setRefreshToken } from '@/lib/auth-token';
 
 /** Erro de API/rede vira mensagem amigável — mesmo contrato usado pelo login (ver #131/#132). */
-function toErrorResult(error: unknown, fallback: string): { ok: false; error: string } {
-  if (error instanceof ApiError) return { ok: false, error: error.message };
+function toErrorResult(error: unknown, fallback: string): { ok: false; error: string; code?: string } {
+  if (error instanceof ApiError) {
+    return error.code
+      ? { ok: false, error: error.message, code: error.code }
+      : { ok: false, error: error.message };
+  }
   if (error instanceof NetworkError) return { ok: false, error: error.message };
   return { ok: false, error: fallback };
 }
 
-type Result = { ok: true } | { ok: false; error: string };
-type ResultWithId = { ok: true; id: string } | { ok: false; error: string };
+type Result = { ok: true } | { ok: false; error: string; code?: string };
+type ResultWithId = { ok: true; id: string } | { ok: false; error: string; code?: string };
 
 interface AppState {
   // --- sessão (UC-01) ---
@@ -66,7 +69,11 @@ interface AppState {
   login: (email: string, senha: string) => Promise<Result>;
   /** `remote: false` só limpa a sessão local (ex.: token já expirado/inválido). */
   logout: (options?: { remote?: boolean }) => void;
-  /** RN-007: nunca revela se o e-mail existe — sempre retorna ok. Só troca a senha de fato quando encontra uma conta ativa. */
+  /**
+   * RN-007: nunca revela se o e-mail existe — sempre retorna ok (após validar o
+   * comprimento mínimo). A redefinição real fica na API; esta ação não grava
+   * senha no cliente.
+   */
   resetPassword: (email: string, novaSenha: string) => Result;
 
   clients: Client[];
@@ -405,20 +412,11 @@ export const useAppStore = create<AppState>()(
       set({ currentUser: null });
     },
 
-    // RN-007: a resposta nunca revela se o e-mail existe (evita enumeração de contas) —
-    // por isso sempre retorna ok, e só troca a senha de fato quando há uma conta
-    // ADMIN/SUPERVISOR ativa com esse e-mail.
-    resetPassword: (email, novaSenha) => {
+    // RN-007: resposta sempre ok (sem enumerar e-mail). Sem mutação local de
+    // credenciais — reset real é responsabilidade da API (fora deste PBI).
+    resetPassword: (_email, novaSenha) => {
       if (novaSenha.trim().length < 6) {
         return { ok: false, error: 'A nova senha deve ter ao menos 6 caracteres.' };
-      }
-      const normalized = email.trim().toLowerCase();
-      const user = get().users.find(
-        (u) => u.email.toLowerCase() === normalized && (u.role === 'ADMIN' || u.role === 'SUPERVISOR')
-      );
-      if (user && user.status === 'ATIVO') {
-        DEMO_CREDENTIALS[normalized] = novaSenha;
-        pushAudit('REDEFINIU_SENHA', 'Usuário', user.id, 'Recuperação de senha');
       }
       return { ok: true };
     },

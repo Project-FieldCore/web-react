@@ -109,7 +109,10 @@ export default function UsersPage() {
     if (result.ok) {
       setNotice(`Status alterado para ${USER_STATUS_LABEL[status]}.`);
       list.reload();
+      return;
     }
+    // Store já recarrega via loadUsers(); a grid paginada precisa do mesmo.
+    if (result.code === 'VERSION_CONFLICT') list.reload();
   }
 
   async function handleCreate(...args: Parameters<typeof createUser>) {
@@ -125,6 +128,9 @@ export default function UsersPage() {
     const result = await updateUser(...args);
     if (result.ok) {
       setNotice('Alterações salvas.');
+      list.reload();
+    } else if (result.code === 'VERSION_CONFLICT') {
+      // Store já recarrega via loadUsers(); a grid paginada precisa do mesmo.
       list.reload();
     }
     return result;
