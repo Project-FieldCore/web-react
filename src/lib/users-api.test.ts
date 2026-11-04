@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createUser, listUsers, searchUsers, setUserStatus, updateUser } from './users-api';
+import { createUser, listActiveTechnicians, listUsers, searchUsers, setUserStatus, updateUser } from './users-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -187,6 +187,39 @@ describe('users-api', () => {
       status: 409,
       code: 'EMAIL_ALREADY_EXISTS',
       message: 'Já existe um usuário com esse e-mail.',
+    });
+  });
+
+  describe('listActiveTechnicians (RN-027)', () => {
+    it('pede só técnicos ativos, ordenados por nome, e percorre todas as páginas', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { items: [{ ...API_USER, role: 'TECHNICIAN' }], page: { page: 0, size: 100, totalElements: 2, totalPages: 2 } }))
+        .mockResolvedValueOnce(jsonResponse(200, { items: [{ ...API_USER, id: 'usr-2', role: 'TECHNICIAN' }], page: { page: 1, size: 100, totalElements: 2, totalPages: 2 } }));
+      global.fetch = fetchMock;
+
+      const technicians = await listActiveTechnicians();
+
+      const first = new URL(fetchMock.mock.calls[0][0]);
+      expect(first.pathname).toMatch(/\/users$/);
+      expect(Object.fromEntries(first.searchParams)).toEqual({ page: '0', size: '100', role: 'TECHNICIAN', status: 'ACTIVE', sort: 'name,asc' });
+      expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('page')).toBe('1');
+      expect(technicians.map((u) => u.id)).toEqual(['usr-1', 'usr-2']);
+    });
+
+    it('supervisor recebe 403 (a API só deixa o ADMIN listar usuários) e o erro chega em português', async () => {
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(403, { status: 403, code: 'ACCESS_DENIED', message: 'Access denied' }));
+
+      await expect(listActiveTechnicians()).rejects.toMatchObject({
+        status: 403,
+        message: 'Você não tem permissão para realizar esta ação.',
+      });
+    });
+
+    it('sem técnicos devolve lista vazia', async () => {
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { items: [], page: { page: 0, size: 100, totalElements: 0, totalPages: 0 } }));
+
+      expect(await listActiveTechnicians()).toEqual([]);
     });
   });
 });

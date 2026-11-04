@@ -79,6 +79,21 @@ export async function listUsers(): Promise<User[]> {
   });
 }
 
+/**
+ * Técnicos ativos (todas as páginas), para o seletor de atribuição (RN-027).
+ * ATENÇÃO: `GET /users` é só de ADMIN na API (supervisor recebe 403); quem chama
+ * trata o 403. Quando o backend ganhar um endpoint de técnicos para o supervisor,
+ * a troca é só neste lugar.
+ */
+export async function listActiveTechnicians(): Promise<User[]> {
+  return fetchAllPages(async (page, size) => {
+    const response = await http.get<ApiUserPage>(
+      `/users${buildQueryString({ page, size, role: 'TECHNICIAN', status: 'ACTIVE', sort: 'name,asc' })}`
+    );
+    return { items: response.items.map(toUser), page: response.page };
+  });
+}
+
 export async function createUser(nome: string, email: string, role: UserRole, senha: string): Promise<User> {
   return toUser(await http.post<ApiUser>('/users', { name: nome, email, role, password: senha }));
 }

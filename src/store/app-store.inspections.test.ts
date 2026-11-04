@@ -16,6 +16,7 @@ const DEMO_TECHNICIAN: User = {
 
 vi.mock('@/lib/inspections-api', () => ({
   scheduleInspection: vi.fn(),
+  assignInspection: vi.fn(),
   startReview: vi.fn(),
   approveInspection: vi.fn(),
   rejectInspection: vi.fn(),
@@ -168,6 +169,54 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       } finally {
         useAppStore.setState({ locations: initialLocations });
       }
+    });
+
+    describe('técnico (RN-027)', () => {
+      const withUsers = (extra: User[]) => {
+        const initial = useAppStore.getState().users;
+        useAppStore.setState({ users: [...initial, ...extra] });
+        return () => useAppStore.setState({ users: initial });
+      };
+      const person = (over: Partial<User>): User => ({ id: 'u-x', nome: 'Pessoa', email: 'p@x.com', role: 'TECHNICIAN', status: 'ATIVO', ...over });
+
+      it('técnico inativo é recusado com a mensagem da RN-027, sem chamar a API', async () => {
+        const restore = withUsers([person({ id: 'u-inativo', status: 'INATIVO' })]);
+        try {
+          const result = await useAppStore.getState().scheduleInspection({ ...input, tecnicoId: 'u-inativo' });
+
+          expect(result).toEqual({ ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' });
+          expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+        } finally {
+          restore();
+        }
+      });
+
+      it('técnico bloqueado também é recusado', async () => {
+        const restore = withUsers([person({ id: 'u-bloq', status: 'BLOQUEADO' })]);
+        try {
+          expect((await useAppStore.getState().scheduleInspection({ ...input, tecnicoId: 'u-bloq' })).ok).toBe(false);
+        } finally {
+          restore();
+        }
+      });
+
+      it('quem não é técnico é recusado, mesmo ativo', async () => {
+        const restore = withUsers([person({ id: 'u-admin', role: 'ADMIN' })]);
+        try {
+          const result = await useAppStore.getState().scheduleInspection({ ...input, tecnicoId: 'u-admin' });
+
+          expect(result).toEqual({ ok: false, error: 'O usuário escolhido não é um técnico.' });
+        } finally {
+          restore();
+        }
+      });
+
+      it('técnico que não está na lista carregada pede para recarregar', async () => {
+        const result = await useAppStore.getState().scheduleInspection({ ...input, tecnicoId: 'nao-existe' });
+
+        expect(result).toEqual({ ok: false, error: 'Técnico não encontrado. Recarregue a lista de técnicos e tente de novo.' });
+        expect(inspectionsApi.scheduleInspection).not.toHaveBeenCalled();
+      });
     });
 
     it('RN-025: data prevista obrigatória', async () => {
@@ -450,6 +499,101 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
       expect(find(SENT_ID).status).toBe('EM_ANDAMENTO');
       expect(useAppStore.getState().syncQueue).toHaveLength(1);
+    });
+  });
+
+  describe('reatribuição de técnico (RN-027)', () => {
+    const NEW_TECH: User = { id: 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee', nome: 'Bia Costa', email: 'bia@x.com', role: 'TECHNICIAN', status: 'ATIVO' };
+    const INACTIVE_TECH: User = { ...NEW_TECH, id: 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee', nome: 'Caio Inativo', status: 'INATIVO' };
+    const setInspection = (patch: Partial<Inspection>) =>
+      useAppStore.setState((s) => ({ inspections: s.inspections.map((i) => (i.id === ASSIGNED_ID ? { ...i, ...patch } : i)) }));
+
+    beforeEach(() => {
+      useAppStore.setState((s) => ({ users: [...s.users, NEW_TECH, INACTIVE_TECH] }));
+    });
+
+    it('inspeção só da tela (sem version): troca localmente, sem chamar a API, e registra no histórico', async () => {
+      const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id);
+
+      expect(result).toEqual({ ok: true });
+      expect(find(ASSIGNED_ID)).toMatchObject({ tecnicoId: NEW_TECH.id, status: 'ATRIBUIDA' });
+      expect(inspectionsApi.assignInspection).not.toHaveBeenCalled();
+      expect(useAppStore.getState().auditEvents[0]).toMatchObject({ action: 'REATRIBUIU', entityId: ASSIGNED_ID, details: 'Bia Costa' });
+    });
+
+    it('inspeção da API (com version): chama PATCH assignee e guarda o que voltou (com o version novo)', async () => {
+      setInspection({ version: 2 });
+      mocked(inspectionsApi.assignInspection).mockResolvedValue({ tecnicoId: NEW_TECH.id, status: 'ATRIBUIDA', version: 3 });
+
+      const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id);
+
+      expect(result).toEqual({ ok: true });
+      expect(inspectionsApi.assignInspection).toHaveBeenCalledWith(ASSIGNED_ID, NEW_TECH.id, 2);
+      expect(find(ASSIGNED_ID)).toMatchObject({ tecnicoId: NEW_TECH.id, version: 3 });
+    });
+
+    it('preserva o resto da inspeção (respostas, modelo, data)', async () => {
+      const before = find(ASSIGNED_ID);
+
+      await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id);
+
+      expect(find(ASSIGNED_ID)).toMatchObject({ modeloId: before.modeloId, dataPrevista: before.dataPrevista, answers: before.answers });
+    });
+
+    it('técnico inativo é recusado antes de ir à API e nada muda', async () => {
+      setInspection({ version: 2 });
+      const before = find(ASSIGNED_ID);
+
+      const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, INACTIVE_TECH.id);
+
+      expect(result).toEqual({ ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' });
+      expect(inspectionsApi.assignInspection).not.toHaveBeenCalled();
+      expect(find(ASSIGNED_ID)).toEqual(before);
+    });
+
+    it('inspeção que não é atribuída (ex.: em andamento ou enviada) não troca de técnico', async () => {
+      for (const status of ['EM_ANDAMENTO', 'ENVIADA', 'EM_REVISAO', 'APROVADA', 'CANCELADA'] as const) {
+        setInspection({ status });
+
+        const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id);
+
+        expect(result, status).toEqual({ ok: false, error: 'Esta inspeção já não pode ser reatribuída no estado atual.' });
+      }
+      expect(inspectionsApi.assignInspection).not.toHaveBeenCalled();
+    });
+
+    it('o mesmo técnico não conta como troca', async () => {
+      const current = find(ASSIGNED_ID).tecnicoId;
+
+      const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, current);
+
+      expect(result).toEqual({ ok: false, error: 'Esta inspeção já está atribuída a esse técnico.' });
+    });
+
+    it('erro da API (ex.: 409 INSPECTION_NOT_ASSIGNABLE) volta em português e não altera a inspeção', async () => {
+      setInspection({ version: 2 });
+      mocked(inspectionsApi.assignInspection).mockRejectedValue(
+        new ApiError('Esta inspeção já não pode ser reatribuída no estado atual.', 409, undefined, 'INSPECTION_NOT_ASSIGNABLE')
+      );
+      const before = find(ASSIGNED_ID);
+
+      const result = await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id);
+
+      expect(result).toMatchObject({ ok: false, error: 'Esta inspeção já não pode ser reatribuída no estado atual.', code: 'INSPECTION_NOT_ASSIGNABLE' });
+      expect(find(ASSIGNED_ID)).toEqual(before);
+    });
+
+    it('erro de rede não altera a inspeção', async () => {
+      setInspection({ version: 2 });
+      mocked(inspectionsApi.assignInspection).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+      expect(await useAppStore.getState().reassignInspection(ASSIGNED_ID, NEW_TECH.id)).toEqual({ ok: false, error: 'Sem conexão.' });
+      expect(find(ASSIGNED_ID).tecnicoId).not.toBe(NEW_TECH.id);
+    });
+
+    it('inspeção ou técnico inexistentes devolvem erro', async () => {
+      expect(await useAppStore.getState().reassignInspection('INS-0000', NEW_TECH.id)).toEqual({ ok: false, error: 'Inspeção não encontrada.' });
+      expect((await useAppStore.getState().reassignInspection(ASSIGNED_ID, 'nao-existe')).ok).toBe(false);
     });
   });
 

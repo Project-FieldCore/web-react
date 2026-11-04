@@ -10,6 +10,8 @@ import { formatDateTime } from '@/lib/inspection-display';
 import { ErrorState, InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { CancelInspectionDialog } from '@/components/inspections/CancelInspectionDialog';
+import { ReassignTechnicianDialog } from '@/components/inspections/ReassignTechnicianDialog';
+import { canReassign } from '@/lib/technician-rules';
 import { CancelInspectionAction } from '@/components/inspections/CancelInspectionAction';
 import { CancellationInfo } from '@/components/inspections/CancellationInfo';
 
@@ -36,6 +38,7 @@ export default function InspectionReviewPage() {
   const rejectInspection = useAppStore((s) => s.rejectInspection);
   const returnForCorrection = useAppStore((s) => s.returnForCorrection);
   const cancelInspection = useAppStore((s) => s.cancelInspection);
+  const reassignInspection = useAppStore((s) => s.reassignInspection);
 
   const review = useAsyncAction();
   const [comentario, setComentario] = useState('');
@@ -46,7 +49,15 @@ export default function InspectionReviewPage() {
   const [returnFeedback, setReturnFeedback] = useState('');
   const [returnError, setReturnError] = useState<string | null>(null);
   const [showCancel, setShowCancel] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [reassignNotice, setReassignNotice] = useState<string | null>(null);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!reassignNotice) return;
+    const timer = setTimeout(() => setReassignNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [reassignNotice]);
 
   useEffect(() => {
     if (!cancelNotice) return;
@@ -63,6 +74,15 @@ export default function InspectionReviewPage() {
   const tech = users.find((u) => u.id === inspection.tecnicoId);
 
   const canReview = inspection.status === 'ENVIADA' || inspection.status === 'EM_REVISAO';
+
+  async function handleReassign(tecnicoId: string) {
+    const result = await reassignInspection(inspection!.id, tecnicoId);
+    if (result.ok) {
+      const next = useAppStore.getState().users.find((u) => u.id === tecnicoId);
+      setReassignNotice(`Inspeção atribuída a ${next?.nome ?? 'o novo técnico'}.`);
+    }
+    return result;
+  }
 
   async function handleCancel(justificativa: string) {
     const result = await cancelInspection(inspection!.id, justificativa);
@@ -108,12 +128,26 @@ export default function InspectionReviewPage() {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-        <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Técnico</span>{tech?.nome}</div>
+        <div>
+          <span className="text-slate-400 text-xs uppercase font-bold block mb-1">Técnico</span>
+          {tech?.nome ?? '—'}
+          {canReassign(inspection.status) && (
+            <button type="button" onClick={() => setShowReassign(true)} className="ml-3 text-xs font-bold text-navy-700 underline">
+              Alterar técnico
+            </button>
+          )}
+        </div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Prioridade</span><PriorityTag priority={inspection.prioridade} /></div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Modelo</span>{model?.title} · v{inspection.modeloVersao}</div>
         <div><span className="text-slate-400 text-xs uppercase font-bold block mb-1">Data prevista</span>{formatDateTime(inspection.dataPrevista)}</div>
         <InspectionInstructions text={inspection.orientacoes} />
       </div>
+
+      {reassignNotice && (
+        <div role="status" className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3 mb-5">
+          {reassignNotice}
+        </div>
+      )}
 
       {cancelNotice && (
         <div role="status" className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3 mb-5">
@@ -261,6 +295,15 @@ export default function InspectionReviewPage() {
           {inspection.review.decidedAt ? ` em ${new Date(inspection.review.decidedAt).toLocaleString('pt-BR')}` : ''}.
           {inspection.review.motivoReprovacao ? ` Motivo: ${inspection.review.motivoReprovacao}` : ''}
         </div>
+      )}
+
+      {showReassign && (
+        <ReassignTechnicianDialog
+          inspectionId={inspection.id}
+          currentTechnicianName={tech?.nome}
+          onConfirm={handleReassign}
+          onClose={() => setShowReassign(false)}
+        />
       )}
 
       {showCancel && (

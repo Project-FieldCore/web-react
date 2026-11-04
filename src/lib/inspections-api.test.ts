@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { scheduleInspection, toInspection, toScheduleBody, type ApiInspection, type ScheduleInspectionInput } from './inspections-api';
+import { assignInspection, scheduleInspection, toAssignmentUpdate, toInspection, toScheduleBody, type ApiInspection, type ScheduleInspectionInput } from './inspections-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -85,7 +85,12 @@ describe('toInspection', () => {
       status: 'ATRIBUIDA',
       answers: {},
       nonConformities: {},
+      version: 0,
     });
+  });
+
+  it('guarda o version da API (necessário para trocar o técnico)', () => {
+    expect(toInspection({ ...API_INSPECTION, version: 4 }, context).version).toBe(4);
   });
 
   it('converte todos os status da API', () => {
@@ -183,5 +188,48 @@ describe('scheduleInspection (API)', () => {
     );
 
     await expect(scheduleInspection(INPUT, 'ver-1', 3)).rejects.toMatchObject({ status: 400, message: 'deve ser uma data futura' });
+  });
+
+  describe('troca de técnico', () => {
+    it('toAssignmentUpdate converte só o que muda (técnico, status e version)', () => {
+      expect(toAssignmentUpdate({ technicianId: 'tec-2', status: 'ASSIGNED', version: 3 })).toEqual({
+        tecnicoId: 'tec-2',
+        status: 'ATRIBUIDA',
+        version: 3,
+      });
+    });
+
+    it('faz PATCH /inspections/{id}/assignee com technicianId e o version', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ...API_INSPECTION, technicianId: 'tec-2', version: 1 }));
+      global.fetch = fetchMock;
+
+      const update = await assignInspection('ins-1', 'tec-2', 0);
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toMatch(/\/inspections\/ins-1\/assignee$/);
+      expect(init.method).toBe('PATCH');
+      expect(JSON.parse(init.body)).toEqual({ technicianId: 'tec-2', version: 0 });
+      expect(update).toEqual({ tecnicoId: 'tec-2', status: 'ATRIBUIDA', version: 1 });
+    });
+
+    it('traduz os erros da atribuição para português', async () => {
+      const error = (status: number, code: string) => jsonResponse(status, { status, code, message: 'english' });
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(error(409, 'INSPECTION_NOT_ASSIGNABLE'))
+        .mockResolvedValueOnce(error(409, 'VERSION_CONFLICT'))
+        .mockResolvedValueOnce(error(409, 'TECHNICIAN_NOT_ACTIVE'))
+        .mockResolvedValueOnce(error(404, 'TECHNICIAN_NOT_FOUND'));
+
+      const messages: string[] = [];
+      for (let i = 0; i < 4; i++) messages.push(await assignInspection('ins-1', 'tec-2', 0).catch((e) => e.message));
+
+      expect(messages).toEqual([
+        'Esta inspeção já não pode ser reatribuída no estado atual.',
+        'Este registro foi alterado por outra pessoa. Os dados foram recarregados — tente de novo.',
+        'Somente técnicos ativos podem receber uma nova atribuição (RN-027).',
+        'Técnico não encontrado. Ele pode ter sido removido.',
+      ]);
+    });
   });
 });
