@@ -45,6 +45,7 @@ import * as itemsApi from '@/lib/items-api';
 import { isApiUuid } from '@/lib/api-id';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
+import { activeTechnicians as listAssignable, assignBlockedReason, reassignBlockedReason } from '@/lib/technician-rules';
 import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
 import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
 import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
@@ -105,6 +106,13 @@ interface AppState {
    * dela para o store (por id), para editar/mudar status usar o `version` mais recente.
    */
   mergeUsers: (items: User[]) => void;
+  /**
+   * Técnicos ativos para o seletor de atribuição (RN-027). `unavailable` = o perfil
+   * não pode listar usuários na API (hoje só ADMIN pode), e o seletor explica isso.
+   */
+  techniciansStatus: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+  techniciansError: string | null;
+  loadTechnicians: () => Promise<void>;
   mergeClients: (items: Client[]) => void;
   mergeLocations: (items: Location[]) => void;
   mergeEquipment: (items: Equipment[]) => void;
@@ -196,6 +204,8 @@ interface AppState {
    * Registra usuário, data e justificativa. Ainda só na tela: o backend não tem endpoint de cancelar.
    */
   cancelInspection: (inspectionId: string, justificativa: string) => Promise<Result>;
+  /** Troca o técnico de uma inspeção atribuída ou em rascunho; só técnico ativo recebe (RN-027). */
+  reassignInspection: (inspectionId: string, tecnicoId: string) => Promise<Result>;
 
   // --- não conformidades — integradas à API (#135) ---
   resolveNonConformity: (inspectionId: string, itemId: string, status: NonConformityStatus) => Promise<Result>;
@@ -248,6 +258,8 @@ function validateModelMeta(
   }
   return null;
 }
+
+const UNKNOWN_FALLBACK = 'Técnico não encontrado. Recarregue a lista de técnicos e tente de novo.';
 
 /** Mínimo exigido pela API para a senha de um novo usuário. */
 const MIN_PASSWORD_LENGTH = 8;
@@ -366,6 +378,8 @@ export const useAppStore = create<AppState>()(
     users: MOCK_USERS,
     usersStatus: 'idle',
     usersError: null,
+    techniciansStatus: 'idle',
+    techniciansError: null,
     models: MOCK_MODELS,
     modelLoad: { id: null, status: 'idle', error: null },
     inspections: MOCK_INSPECTIONS,
@@ -645,6 +659,27 @@ export const useAppStore = create<AppState>()(
 
     // Substitui a lista pelo cadastro real da API (somente ADMIN). Até a carga
     // terminar, a tela /users mostra loading — nunca os dados de exemplo.
+    loadTechnicians: async () => {
+      if (get().techniciansStatus !== 'ready') set({ techniciansStatus: 'loading', techniciansError: null });
+      try {
+        const technicians = await usersApi.listActiveTechnicians();
+        // Entram na lista de usuários (por id), para os nomes aparecerem nas inspeções.
+        set((s) => ({ users: upsertById(s.users, technicians), techniciansStatus: 'ready', techniciansError: null }));
+      } catch (error) {
+        // Só ADMIN lista usuários na API: para os outros perfis isso não é falha, é limitação do acesso.
+        if (error instanceof ApiError && error.status === 403) {
+          set({
+            techniciansStatus: 'unavailable',
+            techniciansError:
+              'Seu perfil não pode listar técnicos pela API. Peça a um administrador para atribuir a inspeção.',
+          });
+          return;
+        }
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os técnicos. Tente novamente.');
+        set({ techniciansStatus: 'error', techniciansError: message });
+      }
+    },
+
     loadUsers: async () => {
       // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
       if (get().usersStatus !== 'ready') set({ usersStatus: 'loading', usersError: null });
@@ -1124,10 +1159,9 @@ export const useAppStore = create<AppState>()(
       if (!model || model.status !== 'PUBLICADO') {
         return { ok: false, error: 'Selecione um modelo com versão publicada (RN-024).' };
       }
-      const tech = get().users.find((u) => u.id === input.tecnicoId && u.role === 'TECHNICIAN');
-      if (!tech || tech.status !== 'ATIVO') {
-        return { ok: false, error: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).' };
-      }
+      const tech = get().users.find((u) => u.id === input.tecnicoId);
+      const blockedTechnician = assignBlockedReason(tech);
+      if (!tech || blockedTechnician) return { ok: false, error: blockedTechnician ?? UNKNOWN_FALLBACK };
       // RN-025 + o que a API exige: data futura e orientações até 2000 caracteres.
       const invalid = validateSchedule(input);
       if (invalid) return { ok: false, error: invalid };
@@ -1156,6 +1190,29 @@ export const useAppStore = create<AppState>()(
       set((s) => ({ inspections: [inspection, ...s.inspections] }));
       pushAudit('AGENDOU', 'Inspeção', inspection.id, `${tech.nome} · ${new Date(input.dataPrevista).toLocaleDateString('pt-BR')}`);
       return { ok: true, id: inspection.id };
+    },
+
+    reassignInspection: async (inspectionId, tecnicoId) => {
+      const inspection = get().inspections.find((i) => i.id === inspectionId);
+      if (!inspection) return { ok: false, error: 'Inspeção não encontrada.' };
+      const blockedInspection = reassignBlockedReason(inspection, tecnicoId);
+      if (blockedInspection) return { ok: false, error: blockedInspection };
+      const tech = get().users.find((u) => u.id === tecnicoId);
+      const blockedTechnician = assignBlockedReason(tech);
+      if (!tech || blockedTechnician) return { ok: false, error: blockedTechnician ?? UNKNOWN_FALLBACK };
+
+      let update: Pick<Inspection, 'tecnicoId' | 'status' | 'version'> = { tecnicoId, status: 'ATRIBUIDA', version: inspection.version };
+      // Inspeção que veio da API (tem version): o servidor também valida o técnico e o estado.
+      if (inspection.version !== undefined) {
+        try {
+          update = await inspectionsApi.assignInspection(inspectionId, tecnicoId, inspection.version);
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível alterar o técnico. Tente novamente.');
+        }
+      }
+      set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, ...update } : i)) }));
+      pushAudit('REATRIBUIU', 'Inspeção', inspectionId, `${tech.nome}`);
+      return { ok: true };
     },
 
     cancelInspection: async (inspectionId, justificativa) => {

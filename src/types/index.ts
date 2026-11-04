@@ -240,6 +240,8 @@ export interface Inspection {
   correcoes?: CorrectionFeedback[];
   /** Preenchido quando a inspeção é cancelada (RN-029). */
   cancelamento?: Cancellation;
+  /** Versão da API (trava otimista), necessária para trocar o técnico. Ausente em inspeções só da tela. */
+  version?: number;
 }
 
 /**

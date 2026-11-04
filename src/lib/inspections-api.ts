@@ -105,6 +105,7 @@ export function toInspection(
     status: STATUS_FROM_API[api.status],
     answers: {},
     nonConformities: {},
+    version: api.version,
   };
 }
 
@@ -116,6 +117,18 @@ export async function scheduleInspection(
 ): Promise<Inspection> {
   const api = await http.post<ApiInspection>('/inspections', toScheduleBody(input, templateVersionId));
   return toInspection(api, { modeloId: input.modeloId, modeloVersao, equipamentoId: input.equipamentoId });
+}
+
+/** O que a troca de técnico altera na inspeção da tela (o resto — respostas, modelo — é preservado). */
+export type AssignmentUpdate = Pick<Inspection, 'tecnicoId' | 'status' | 'version'>;
+
+export function toAssignmentUpdate(api: Pick<ApiInspection, 'technicianId' | 'status' | 'version'>): AssignmentUpdate {
+  return { tecnicoId: api.technicianId, status: STATUS_FROM_API[api.status], version: api.version };
+}
+
+/** Troca o técnico (`PATCH /inspections/{id}/assignee`); só vale em inspeção atribuída ou em rascunho. */
+export async function assignInspection(id: string, technicianId: string, version: number): Promise<AssignmentUpdate> {
+  return toAssignmentUpdate(await http.patch<ApiInspection>(`/inspections/${id}/assignee`, { technicianId, version }));
 }
 
 export function startReview(id: string): Promise<Inspection> {

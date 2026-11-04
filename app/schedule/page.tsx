@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { TechnicianField } from '@/components/inspections/TechnicianField';
+import { SYNC_NOTICE } from '@/lib/technician-rules';
 import { PRIORITY_LABEL, formatDateTime, summarizeInstructions } from '@/lib/inspection-display';
 import {
   MAX_INSTRUCTIONS,
@@ -31,7 +33,7 @@ export default function SchedulePage() {
   const locationsStatus = useAppStore((s) => s.locationsStatus);
   const loadLocations = useAppStore((s) => s.loadLocations);
   const equipment = useAppStore((s) => s.equipment);
-  const technicians = useAppStore((s) => s.users.filter((u) => u.role === 'TECHNICIAN'));
+  const users = useAppStore((s) => s.users);
   const scheduleInspection = useAppStore((s) => s.scheduleInspection);
 
   const [modeloId, setModeloId] = useState(models[0]?.id ?? '');
@@ -65,8 +67,7 @@ export default function SchedulePage() {
   const selectedClient = clients.find((c) => c.id === clienteId);
   const selectedLocation = locations.find((l) => l.id === localId);
   const selectedEquipment = equipment.find((e) => e.id === equipamentoId);
-  const selectedTech = technicians.find((t) => t.id === tecnicoId);
-  const activeTechnicians = technicians.filter((t) => t.status === 'ATIVO');
+  const selectedTech = users.find((u) => u.id === tecnicoId);
   const localOnly = isLocalOnlySchedule(selectedModel);
 
   // RN-025: campos obrigatórios para habilitar o envio; a API também exige data futura.
@@ -96,7 +97,10 @@ export default function SchedulePage() {
       orientacoes,
     }));
     if (!result.ok) return;
-    setSuccess(`Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}.`);
+    // RN-028: inspeção enviada pela API aparece para o técnico depois da sincronização no aplicativo.
+    setSuccess(
+      `Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}.${localOnly ? '' : ` ${SYNC_NOTICE}`}`
+    );
     setTimeout(() => router.push('/inspections'), 900);
   }
 
@@ -199,15 +203,7 @@ export default function SchedulePage() {
           <Section step={3} title="Responsável e agenda">
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Técnico responsável" required>
-                <select value={tecnicoId} onChange={(e) => setTecnicoId(e.target.value)} className="input">
-                  <option value="">Selecione...</option>
-                  {technicians.map((t) => (
-                    <option key={t.id} value={t.id} disabled={t.status !== 'ATIVO'}>{t.nome}{t.status !== 'ATIVO' ? ' (inativo)' : ''}</option>
-                  ))}
-                </select>
-                {activeTechnicians.length === 0 && (
-                  <p className="text-xs text-amber-700 mt-1">Nenhum técnico ativo disponível para atribuição (RN-027).</p>
-                )}
+                <TechnicianField id="schedule-technician" value={tecnicoId} onChange={setTecnicoId} />
               </Field>
               <Field label="Prioridade" required>
                 <select value={prioridade} onChange={(e) => setPrioridade(e.target.value as Priority)} className="input">

@@ -18,6 +18,7 @@ vi.mock('@/lib/locations-api', () => ({
 }));
 vi.mock('@/lib/users-api', () => ({
   listUsers: vi.fn(),
+  listActiveTechnicians: vi.fn(),
   createUser: vi.fn(),
   updateUser: vi.fn(),
   setUserStatus: vi.fn(),
@@ -621,6 +622,92 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
       await useAppStore.getState().setUserStatus('u1', 'INATIVO');
 
       expect(usersApi.setUserStatus).toHaveBeenCalledWith('u1', 'INATIVO', 7);
+    });
+  });
+
+  describe('técnicos ativos para o seletor (PBI-0027.1)', () => {
+    const initialUsers = useAppStore.getState().users;
+    const tech = (over: Partial<User> = {}): User => ({ id: 't1', nome: 'Marcos', email: 'm@x.com', role: 'TECHNICIAN', status: 'ATIVO', version: 0, ...over });
+
+    beforeEach(() => {
+      useAppStore.setState({ users: initialUsers, techniciansStatus: 'idle', techniciansError: null });
+    });
+    afterEach(() => {
+      useAppStore.setState({ users: initialUsers, techniciansStatus: 'idle', techniciansError: null });
+    });
+
+    it('carrega os técnicos ativos, marca como pronto e os acrescenta aos usuários (por id)', async () => {
+      mocked(usersApi.listActiveTechnicians).mockResolvedValue([tech(), tech({ id: 't2', nome: 'Bia' })]);
+
+      const promise = useAppStore.getState().loadTechnicians();
+      expect(useAppStore.getState().techniciansStatus).toBe('loading');
+      await promise;
+
+      expect(useAppStore.getState()).toMatchObject({ techniciansStatus: 'ready', techniciansError: null });
+      expect(useAppStore.getState().users.filter((u) => u.role === 'TECHNICIAN').map((u) => u.id)).toEqual(['t1', 't2']);
+      expect(useAppStore.getState().users.length).toBe(initialUsers.length + 2);
+    });
+
+    it('recarregar atualiza o mesmo técnico em vez de duplicar', async () => {
+      mocked(usersApi.listActiveTechnicians).mockResolvedValue([tech()]);
+      await useAppStore.getState().loadTechnicians();
+      mocked(usersApi.listActiveTechnicians).mockResolvedValue([tech({ nome: 'Marcos Silva', version: 2 })]);
+
+      await useAppStore.getState().loadTechnicians();
+
+      const matches = useAppStore.getState().users.filter((u) => u.id === 't1');
+      expect(matches).toHaveLength(1);
+      expect(matches[0]).toMatchObject({ nome: 'Marcos Silva', version: 2 });
+    });
+
+    it('sem técnicos ativos é um resultado válido (estado vazio, não erro)', async () => {
+      mocked(usersApi.listActiveTechnicians).mockResolvedValue([]);
+
+      await useAppStore.getState().loadTechnicians();
+
+      expect(useAppStore.getState().techniciansStatus).toBe('ready');
+    });
+
+    it('403 (supervisor não lista usuários na API) vira "indisponível", com a explicação, e não erro', async () => {
+      mocked(usersApi.listActiveTechnicians).mockRejectedValue(new ApiError('Você não tem permissão para realizar esta ação.', 403));
+
+      await useAppStore.getState().loadTechnicians();
+
+      expect(useAppStore.getState().techniciansStatus).toBe('unavailable');
+      expect(useAppStore.getState().techniciansError).toContain('Seu perfil não pode listar técnicos');
+      expect(useAppStore.getState().users).toEqual(initialUsers);
+    });
+
+    it('erro de rede ou do servidor vira estado de erro com a mensagem', async () => {
+      mocked(usersApi.listActiveTechnicians).mockRejectedValue(new NetworkError('Sem conexão.'));
+
+      await useAppStore.getState().loadTechnicians();
+
+      expect(useAppStore.getState()).toMatchObject({ techniciansStatus: 'error', techniciansError: 'Sem conexão.' });
+    });
+
+    it('nova tentativa depois do erro volta a mostrar o loading e se recupera', async () => {
+      mocked(usersApi.listActiveTechnicians).mockRejectedValueOnce(new NetworkError('Sem conexão.')).mockResolvedValueOnce([tech()]);
+      await useAppStore.getState().loadTechnicians();
+      expect(useAppStore.getState().techniciansStatus).toBe('error');
+
+      const retry = useAppStore.getState().loadTechnicians();
+      expect(useAppStore.getState().techniciansStatus).toBe('loading');
+      await retry;
+
+      expect(useAppStore.getState()).toMatchObject({ techniciansStatus: 'ready', techniciansError: null });
+    });
+
+    it('recarga com a lista já pronta é silenciosa (não pisca o loading)', async () => {
+      mocked(usersApi.listActiveTechnicians).mockResolvedValue([tech()]);
+      await useAppStore.getState().loadTechnicians();
+      const statuses: string[] = [];
+      const unsubscribe = useAppStore.subscribe((st) => statuses.push(st.techniciansStatus));
+
+      await useAppStore.getState().loadTechnicians();
+      unsubscribe();
+
+      expect(statuses).not.toContain('loading');
     });
   });
 });
