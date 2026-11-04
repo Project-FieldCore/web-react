@@ -3,21 +3,12 @@ import { toOrderPayload } from './section-order';
 import type { ModelSection } from '@/types';
 
 /**
- * Contrato real da API de seções do checklist (openapi/fieldops-v1.yaml +
- * TemplateSectionController, ADMIN e SUPERVISOR) — hoje só na branch
- * `feature/checklist-section-ordering` do backend. As seções ficam sob a
- * VERSÃO do modelo, não sob o modelo:
- *   GET   /template-versions/{versionId}/sections        -> Section[] (ordenado por displayOrder)
- *   POST  /template-versions/{versionId}/sections        -> 201 Section { title, description?, displayOrder }
- *                                                           (409 SECTION_ORDER_ALREADY_EXISTS)
- *   PATCH /template-versions/{versionId}/sections/order  -> Section[] { sections: [{ sectionId, displayOrder }] }
- *                                                           lista COMPLETA, ids e ordens únicos (400 INVALID_SECTION_ORDER)
- * Só em modelo em rascunho (409 TEMPLATE_NOT_EDITABLE).
- *
- * PENDENTE NO BACKEND: nenhum endpoint cria ou expõe o `versionId` de um
- * rascunho (POST /inspection-templates não cria a versão). Enquanto isso o
- * construtor ordena as seções só na tela, e este módulo ainda não é chamado.
- * Não há endpoint para editar o título nem remover uma seção.
+ * Contrato real da API de seções (openapi/fieldops-v1.yaml + TemplateSectionController):
+ *   GET   /template-versions/{versionId}/sections        -> Section[]
+ *   POST  /template-versions/{versionId}/sections        -> 201 Section
+ *   PATCH /template-versions/{versionId}/sections/order  -> Section[]
+ * `versionId` = `draftVersionId` do InspectionTemplate (DRAFT).
+ * Itens vêm de `items-api` por sectionId — a seção chega sem itens.
  */
 
 interface ApiSection {
@@ -28,7 +19,6 @@ interface ApiSection {
   displayOrder: number;
 }
 
-/** Itens do checklist ainda não vêm dessa API: a seção chega sem itens. */
 function toSection(section: ApiSection): ModelSection {
   return {
     id: section.id,

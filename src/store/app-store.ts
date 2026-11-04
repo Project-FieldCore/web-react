@@ -40,6 +40,9 @@ import * as equipmentApi from '@/lib/equipment-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
+import * as sectionsApi from '@/lib/sections-api';
+import * as itemsApi from '@/lib/items-api';
+import { isApiUuid } from '@/lib/api-id';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
 import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
@@ -144,9 +147,7 @@ interface AppState {
   updateUser: (id: string, patch: Partial<Pick<User, 'nome' | 'email' | 'role'>>) => Promise<Result>;
   setUserStatus: (id: string, status: UserStatus) => Promise<Result>;
 
-  // --- modelos (UC-04, UC-05) — integrados à API (#134). As edições do
-  // construtor (meta/seções/itens) mexem só no rascunho local; `saveModel`,
-  // `publishModel` e `createDraftModel` é que falam com a API. ---
+  // --- modelos (UC-04, UC-05) — meta + seções/itens via API quando há draftVersionId ---
   createDraftModel: (input: NewModelInput) => Promise<ResultWithId>;
   /** Carrega um modelo pela API (link direto/refresh no construtor). */
   loadModel: (modelId: string) => Promise<void>;
@@ -159,14 +160,14 @@ interface AppState {
   ) => Promise<Result>;
   saveModel: (modelId: string) => Promise<Result>;
   updateModelMeta: (modelId: string, patch: Partial<Pick<InspectionModel, 'title' | 'description' | 'category'>>) => void;
-  addSection: (modelId: string) => void;
+  addSection: (modelId: string) => Promise<Result>;
   removeSection: (modelId: string, sectionId: string) => void;
   /** RN-017: sobe/desce a seção e renumera a ordem (0, 1, 2…, única na versão). */
-  moveSection: (modelId: string, sectionId: string, direction: MoveDirection) => void;
+  moveSection: (modelId: string, sectionId: string, direction: MoveDirection) => Promise<Result>;
   updateSectionTitle: (modelId: string, sectionId: string, title: string) => void;
-  addItem: (modelId: string, sectionId: string) => void;
+  addItem: (modelId: string, sectionId: string) => Promise<Result>;
   removeItem: (modelId: string, sectionId: string, itemId: string) => void;
-  updateItem: (modelId: string, sectionId: string, itemId: string, patch: Partial<ModelItem>) => void;
+  updateItem: (modelId: string, sectionId: string, itemId: string, patch: Partial<ModelItem>) => Promise<Result>;
   publishModel: (modelId: string) => Promise<Result>;
   /** RN-020: alterar um modelo publicado = começar uma nova versão (a publicada fica intacta). */
   startNewModelVersion: (modelId: string) => void;
@@ -768,6 +769,17 @@ export const useAppStore = create<AppState>()(
       let loaded: InspectionModel;
       try {
         loaded = await modelsApi.getModel(modelId);
+        const versionId = loaded.draftVersionId ?? loaded.latestVersionId;
+        if (versionId) {
+          const sections = await sectionsApi.listSections(versionId);
+          const withItems = await Promise.all(
+            sections.map(async (section) => ({
+              ...section,
+              items: await itemsApi.listItems(section.id),
+            }))
+          );
+          loaded = { ...loaded, sections: withItems };
+        }
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           set({ modelLoad: { id: modelId, status: 'not-found', error: error.message } });
@@ -779,10 +791,8 @@ export const useAppStore = create<AppState>()(
       }
       set((s) => {
         const existing = s.models.find((m) => m.id === modelId);
-        // A API ainda não devolve seções: mantém as que já estão na tela.
-        const model = existing ? { ...loaded, sections: existing.sections } : loaded;
         return {
-          models: existing ? s.models.map((m) => (m.id === modelId ? model : m)) : [model, ...s.models],
+          models: existing ? s.models.map((m) => (m.id === modelId ? loaded : m)) : [loaded, ...s.models],
           modelLoad: { id: modelId, status: 'ready', error: null },
         };
       });
@@ -845,20 +855,30 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    addSection: (modelId) => {
-      set((s) => ({
-        models: s.models.map((m) => {
-          if (m.id !== modelId || isLocked(m)) return m;
-          // A nova seção entra no fim, com a próxima ordem (RN-017).
-          const section: ModelSection = {
-            id: newId('sec'),
+    addSection: async (modelId) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
+
+      const displayOrder = nextDisplayOrder(model.sections);
+      let section: ModelSection;
+      if (model.draftVersionId) {
+        try {
+          section = await sectionsApi.createSection(model.draftVersionId, {
             title: 'Nova seção',
-            displayOrder: nextDisplayOrder(m.sections),
-            items: [],
-          };
-          return { ...m, sections: [...m.sections, section] };
-        }),
+            displayOrder,
+          });
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível criar a seção. Tente novamente.');
+        }
+      } else {
+        section = { id: newId('sec'), title: 'Nova seção', displayOrder, items: [] };
+      }
+
+      set((s) => ({
+        models: s.models.map((m) => (m.id === modelId ? { ...m, sections: [...m.sections, section] } : m)),
       }));
+      return { ok: true };
     },
 
     removeSection: (modelId, sectionId) => {
@@ -871,15 +891,38 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    moveSection: (modelId, sectionId, direction) => {
-      set((s) => ({
-        models: s.models.map((m) => {
-          if (m.id !== modelId || isLocked(m)) return m;
-          const sections = moveSectionInList(m.sections, sectionId, direction);
-          // Primeira/última seção (ou id desconhecido): nada muda.
-          return sections === m.sections ? m : { ...m, sections, updatedAt: new Date().toISOString() };
-        }),
-      }));
+    moveSection: async (modelId, sectionId, direction) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
+
+      const sections = moveSectionInList(model.sections, sectionId, direction);
+      if (sections === model.sections) return { ok: true };
+
+      if (model.draftVersionId && sections.every((sec) => isApiUuid(sec.id))) {
+        try {
+          const ordered = await sectionsApi.reorderSections(model.draftVersionId, sections);
+          // Preserva itens já carregados (reorder devolve seções vazias).
+          const withItems = ordered.map((sec) => ({
+            ...sec,
+            items: sections.find((s) => s.id === sec.id)?.items ?? [],
+          }));
+          set((s) => ({
+            models: s.models.map((m) =>
+              m.id === modelId ? { ...m, sections: withItems, updatedAt: new Date().toISOString() } : m
+            ),
+          }));
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível reordenar as seções. Tente novamente.');
+        }
+      } else {
+        set((s) => ({
+          models: s.models.map((m) =>
+            m.id === modelId ? { ...m, sections, updatedAt: new Date().toISOString() } : m
+          ),
+        }));
+      }
+      return { ok: true };
     },
 
     updateSectionTitle: (modelId, sectionId, title) => {
@@ -892,8 +935,14 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    addItem: (modelId, sectionId) => {
-      const item: ModelItem = {
+    addItem: async (modelId, sectionId) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
+      const section = model.sections.find((sec) => sec.id === sectionId);
+      if (!section) return { ok: false, error: 'Seção não encontrada.' };
+
+      const draft: ModelItem = {
         id: newId('item'),
         title: 'Novo item',
         type: 'CONFORMITY',
@@ -901,16 +950,29 @@ export const useAppStore = create<AppState>()(
         evidenceRequiredOnFailure: false,
         observationRequiredOnFailure: false,
       };
+
+      let item = draft;
+      if (isApiUuid(sectionId)) {
+        try {
+          item = await itemsApi.createItem(sectionId, draft, section.items.length);
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível criar o item. Tente novamente.');
+        }
+      }
+
       set((s) => ({
         models: s.models.map((m) =>
-          m.id === modelId && !isLocked(m)
+          m.id === modelId
             ? {
                 ...m,
-                sections: m.sections.map((sec) => (sec.id === sectionId ? { ...sec, items: [...sec.items, item] } : sec)),
+                sections: m.sections.map((sec) =>
+                  sec.id === sectionId ? { ...sec, items: [...sec.items, item] } : sec
+                ),
               }
             : m
         ),
       }));
+      return { ok: true };
     },
 
     removeItem: (modelId, sectionId, itemId) => {
@@ -928,7 +990,16 @@ export const useAppStore = create<AppState>()(
       }));
     },
 
-    updateItem: (modelId, sectionId, itemId, patch) => {
+    updateItem: async (modelId, sectionId, itemId, patch) => {
+      const model = get().models.find((m) => m.id === modelId);
+      if (!model) return { ok: false, error: 'Modelo não encontrado.' };
+      if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
+
+      const current = model.sections.flatMap((sec) => sec.items).find((it) => it.id === itemId);
+      if (!current) return { ok: false, error: 'Item não encontrado.' };
+      const nextLocal = applyItemPatch(current, patch);
+
+      // Otimista na tela; persiste na API quando o item já tem UUID.
       set((s) => ({
         models: s.models.map((m) =>
           m.id === modelId && !isLocked(m)
@@ -936,13 +1007,64 @@ export const useAppStore = create<AppState>()(
                 ...m,
                 sections: m.sections.map((sec) =>
                   sec.id === sectionId
-                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? applyItemPatch(it, patch) : it)) }
+                    ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? nextLocal : it)) }
                     : sec
                 ),
               }
             : m
         ),
       }));
+
+      if (isApiUuid(sectionId) && isApiUuid(itemId)) {
+        try {
+          const saved = await itemsApi.updateItem(sectionId, itemId, {
+            title: patch.title !== undefined ? nextLocal.title : undefined,
+            type: patch.type !== undefined ? nextLocal.type : undefined,
+            required: patch.required !== undefined ? nextLocal.required : undefined,
+            observationRequiredOnFailure:
+              patch.observationRequiredOnFailure !== undefined || patch.type !== undefined
+                ? nextLocal.observationRequiredOnFailure
+                : undefined,
+            evidenceRequiredOnFailure:
+              patch.evidenceRequiredOnFailure !== undefined || patch.type !== undefined
+                ? nextLocal.evidenceRequiredOnFailure
+                : undefined,
+            options: patch.options !== undefined || patch.type === 'SINGLE_CHOICE' ? nextLocal.options : undefined,
+          });
+          set((s) => ({
+            models: s.models.map((m) =>
+              m.id === modelId
+                ? {
+                    ...m,
+                    sections: m.sections.map((sec) =>
+                      sec.id === sectionId
+                        ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? saved : it)) }
+                        : sec
+                    ),
+                  }
+                : m
+            ),
+          }));
+        } catch (error) {
+          // Reverte o otimista.
+          set((s) => ({
+            models: s.models.map((m) =>
+              m.id === modelId
+                ? {
+                    ...m,
+                    sections: m.sections.map((sec) =>
+                      sec.id === sectionId
+                        ? { ...sec, items: sec.items.map((it) => (it.id === itemId ? current : it)) }
+                        : sec
+                    ),
+                  }
+                : m
+            ),
+          }));
+          return toErrorResult(error, 'Não foi possível salvar o item. Tente novamente.');
+        }
+      }
+      return { ok: true };
     },
 
     // RN-015/016: precisa de título, categoria e ao menos uma seção com item válido.

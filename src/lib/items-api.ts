@@ -4,20 +4,12 @@ import type { ItemType, ModelItem } from '@/types';
 
 /**
  * Contrato real da API de itens do checklist (openapi/fieldops-v1.yaml +
- * TemplateItemController, ADMIN e SUPERVISOR) — hoje só na branch
- * `feature/template-response-items` do backend. Os itens ficam sob a SEÇÃO:
- *   GET  /template-sections/{sectionId}/items  -> Item[] (ordenado por displayOrder)
- *   POST /template-sections/{sectionId}/items  -> 201 Item
- *        { code?, title, description?, responseType, required, observationRequiredOnFailure,
- *          evidenceRequiredOnFailure, displayOrder, options? }
- *   Erros: 400 INVALID_RESPONSE_OPTIONS, 409 ITEM_ORDER_ALREADY_EXISTS,
- *          409 TEMPLATE_NOT_EDITABLE, 404 TEMPLATE_SECTION_NOT_FOUND.
- * Flags (PBI-0021.1): required, observation_required_on_failure, evidence_required_on_failure.
- *
- * PENDENTE NO BACKEND: (1) nenhum endpoint cria ou expõe a versão de um
- * rascunho, então a tela não chega a um id de seção; (2) não existe editar
- * nem remover item — as flags só podem ser definidas na criação. Enquanto
- * isso o construtor edita os itens só na tela e este módulo ainda não é chamado.
+ * TemplateItemController, ADMIN e SUPERVISOR). Itens sob a SEÇÃO:
+ *   GET   /template-sections/{sectionId}/items           -> Item[]
+ *   POST  /template-sections/{sectionId}/items           -> 201 Item
+ *   PATCH /template-sections/{sectionId}/items/{itemId}  -> Item (parcial; PBI-0021)
+ * Flags: required, observationRequiredOnFailure, evidenceRequiredOnFailure
+ * (failure flags só persistem para CONFORMITY).
  */
 
 interface ApiItem {
@@ -78,4 +70,33 @@ export async function createItem(sectionId: string, item: ModelItem, displayOrde
       options: item.type === 'SINGLE_CHOICE' ? item.options : undefined,
     })
   );
+}
+
+/** Atualização parcial (PBI-0021). Campos omitidos mantêm o valor atual na API. */
+export async function updateItem(
+  sectionId: string,
+  itemId: string,
+  patch: Partial<Pick<ModelItem, 'title' | 'type' | 'required' | 'observationRequiredOnFailure' | 'evidenceRequiredOnFailure' | 'options'>>,
+  displayOrder?: number
+): Promise<ModelItem> {
+  const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.title = patch.title;
+  if (patch.type !== undefined) body.responseType = patch.type;
+  if (patch.required !== undefined) body.required = patch.required;
+  if (patch.observationRequiredOnFailure !== undefined) {
+    body.observationRequiredOnFailure = patch.observationRequiredOnFailure;
+  }
+  if (patch.evidenceRequiredOnFailure !== undefined) {
+    body.evidenceRequiredOnFailure = patch.evidenceRequiredOnFailure;
+  }
+  if (patch.options !== undefined) body.options = patch.options;
+  if (displayOrder !== undefined) body.displayOrder = displayOrder;
+
+  // Se o tipo muda para fora de CONFORMITY, zera failure flags no payload.
+  if (patch.type !== undefined && !supportsFailureRules(patch.type)) {
+    body.observationRequiredOnFailure = false;
+    body.evidenceRequiredOnFailure = false;
+  }
+
+  return toItem(await http.patch<ApiItem>(`/template-sections/${sectionId}/items/${itemId}`, body));
 }

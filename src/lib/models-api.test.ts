@@ -13,6 +13,8 @@ const API_TEMPLATE = {
   category: 'Segurança',
   status: 'DRAFT',
   currentVersion: null,
+  draftVersionId: 'ver-draft-1',
+  latestVersionId: 'ver-draft-1',
   createdBy: 'usr-1',
   createdAt: '2026-10-01T10:00:00Z',
   updatedAt: '2026-10-01T10:00:00Z',
@@ -49,6 +51,8 @@ describe('models-api (rascunho de modelo de inspeção)', () => {
       status: 'RASCUNHO',
       version: 0,
       lockVersion: 3,
+      draftVersionId: 'ver-draft-1',
+      latestVersionId: 'ver-draft-1',
       sections: [],
       updatedAt: '2026-10-01T10:00:00Z',
     });

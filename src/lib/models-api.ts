@@ -4,14 +4,12 @@ import type { InspectionModel, ModelStatus } from '@/types';
 /**
  * Contrato real da API para o rascunho (openapi/fieldops-v1.yaml + InspectionTemplateController,
  * ADMIN e SUPERVISOR). "Modelo de inspeção" na tela é "inspection template" na API:
- *   POST  /inspection-templates        -> 201 { title, category, description? }  sempre DRAFT
- *                                         (409 TEMPLATE_TITLE_ALREADY_EXISTS — o título é único)
- *   GET   /inspection-templates/{id}   -> template        (404 INSPECTION_TEMPLATE_NOT_FOUND)
+ *   POST  /inspection-templates        -> 201 sempre DRAFT + cria template_version v1
+ *                                         Response inclui draftVersionId (UUID) para seções/itens
+ *                                         (409 TEMPLATE_TITLE_ALREADY_EXISTS)
+ *   GET   /inspection-templates/{id}   -> template (draftVersionId / latestVersionId)
  *   PATCH /inspection-templates/{id}   -> template  { title, description, category, version }
- *                                         só em DRAFT (409 TEMPLATE_NOT_EDITABLE) e com a versão
- *                                         de edição certa (409 VERSION_CONFLICT)
- * Ainda NÃO existe na API: listar modelos, seções/itens, salvar o modelo inteiro e publicar
- * (saveModel/publishModel abaixo seguem num contrato assumido, até esses cards).
+ *                                         só em DRAFT (409 TEMPLATE_NOT_EDITABLE / VERSION_CONFLICT)
  */
 
 type ApiTemplateStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE';
@@ -24,6 +22,10 @@ interface ApiTemplate {
   status: ApiTemplateStatus;
   /** Versão publicada (nula enquanto é rascunho). */
   currentVersion?: number | null;
+  /** UUID da template_version unpublished (DRAFT). */
+  draftVersionId?: string | null;
+  /** UUID da maior template_version. */
+  latestVersionId?: string | null;
   updatedAt: string;
   /** Versão de edição (trava otimista). */
   version: number;
@@ -35,7 +37,7 @@ const STATUS_FROM_API: Record<ApiTemplateStatus, ModelStatus> = {
   INACTIVE: 'ARQUIVADO',
 };
 
-/** `version` da tela é a versão publicada; a `version` da API vira `lockVersion`. Seções ainda não vêm da API. */
+/** `version` da tela é a versão publicada; a `version` da API vira `lockVersion`. */
 function toModel(template: ApiTemplate): InspectionModel {
   return {
     id: template.id,
@@ -45,6 +47,8 @@ function toModel(template: ApiTemplate): InspectionModel {
     status: STATUS_FROM_API[template.status],
     version: template.currentVersion ?? 0,
     lockVersion: template.version,
+    draftVersionId: template.draftVersionId ?? undefined,
+    latestVersionId: template.latestVersionId ?? undefined,
     sections: [],
     updatedAt: template.updatedAt,
   };

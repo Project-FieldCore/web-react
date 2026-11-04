@@ -12,8 +12,19 @@ vi.mock('@/lib/models-api', () => ({
   saveModel: vi.fn(),
   publishModel: vi.fn(),
 }));
+vi.mock('@/lib/sections-api', () => ({
+  listSections: vi.fn().mockResolvedValue([]),
+  createSection: vi.fn(),
+  reorderSections: vi.fn(),
+}));
+vi.mock('@/lib/items-api', () => ({
+  listItems: vi.fn().mockResolvedValue([]),
+  createItem: vi.fn(),
+  updateItem: vi.fn(),
+}));
 
 import * as modelsApi from '@/lib/models-api';
+import * as sectionsApi from '@/lib/sections-api';
 
 function mocked<T extends (...args: never[]) => unknown>(fn: T) {
   return fn as unknown as ReturnType<typeof vi.fn>;
@@ -136,16 +147,25 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(useAppStore.getState().modelLoad).toEqual({ id: 'srv-1', status: 'ready', error: null });
     });
 
-    it('recarregar mantém as seções que já estão na tela (a API ainda não as devolve)', async () => {
-      const section = { id: 'sec-1', title: 'Seção local', displayOrder: 0, items: [] };
-      useAppStore.setState((s) => ({ models: [{ ...apiModel, sections: [section] }, ...s.models] }));
-      mocked(modelsApi.getModel).mockResolvedValue({ ...apiModel, title: 'Renomeado por outra pessoa', lockVersion: 3 });
+    it('com draftVersionId, recarrega seções/itens da API (substitui o estado local)', async () => {
+      const localSection = { id: 'sec-local', title: 'Seção local', displayOrder: 0, items: [] };
+      useAppStore.setState((s) => ({ models: [{ ...apiModel, sections: [localSection] }, ...s.models] }));
+      mocked(modelsApi.getModel).mockResolvedValue({
+        ...apiModel,
+        title: 'Renomeado por outra pessoa',
+        lockVersion: 3,
+        draftVersionId: 'ver-1',
+      });
+      mocked(sectionsApi.listSections).mockResolvedValue([
+        { id: 'sec-api', title: 'Da API', displayOrder: 0, items: [] },
+      ]);
 
       await useAppStore.getState().loadModel('srv-1');
 
       const model = useAppStore.getState().models.find((m) => m.id === 'srv-1')!;
-      expect(model).toMatchObject({ title: 'Renomeado por outra pessoa', lockVersion: 3 });
-      expect(model.sections).toEqual([section]);
+      expect(model).toMatchObject({ title: 'Renomeado por outra pessoa', lockVersion: 3, draftVersionId: 'ver-1' });
+      expect(model.sections).toEqual([{ id: 'sec-api', title: 'Da API', displayOrder: 0, items: [] }]);
+      expect(sectionsApi.listSections).toHaveBeenCalledWith('ver-1');
     });
 
     it('404 vira "not-found"', async () => {
@@ -357,7 +377,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       await useAppStore.getState().publishModel(PUBLISHED_ID);
 
       useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Tentativa de alterar a publicada' });
-      useAppStore.getState().addSection(PUBLISHED_ID);
+      await useAppStore.getState().addSection(PUBLISHED_ID);
 
       const model = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
       expect(model.title).toBe('Manutenção Preventiva (revisado)');
@@ -450,54 +470,54 @@ describe('useAppStore construtor de modelos — #134', () => {
       }));
     });
 
-    it('moveSection sobe e desce renumerando a ordem (0, 1, 2…)', () => {
-      useAppStore.getState().moveSection(DRAFT_ID, 'c', 'up');
+    it('moveSection sobe e desce renumerando a ordem (0, 1, 2…)', async () => {
+      await useAppStore.getState().moveSection(DRAFT_ID, 'c', 'up');
       expect(orderOf(DRAFT_ID)).toEqual([['a', 0], ['c', 1], ['b', 2]]);
 
-      useAppStore.getState().moveSection(DRAFT_ID, 'a', 'down');
+      await useAppStore.getState().moveSection(DRAFT_ID, 'a', 'down');
       expect(orderOf(DRAFT_ID)).toEqual([['c', 0], ['a', 1], ['b', 2]]);
     });
 
-    it('moveSection na primeira (subir) e na última (descer) não muda nada', () => {
+    it('moveSection na primeira (subir) e na última (descer) não muda nada', async () => {
       const before = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!;
 
-      useAppStore.getState().moveSection(DRAFT_ID, 'a', 'up');
-      useAppStore.getState().moveSection(DRAFT_ID, 'c', 'down');
+      await useAppStore.getState().moveSection(DRAFT_ID, 'a', 'up');
+      await useAppStore.getState().moveSection(DRAFT_ID, 'c', 'down');
 
       expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)).toBe(before);
     });
 
-    it('moveSection atualiza o updatedAt só quando muda de fato', () => {
+    it('moveSection atualiza o updatedAt só quando muda de fato', async () => {
       const before = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.updatedAt;
 
-      useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
+      await useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
 
       expect(useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.updatedAt).not.toBe(before);
     });
 
-    it('moveSection só mexe no modelo pedido', () => {
+    it('moveSection só mexe no modelo pedido', async () => {
       const published = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
 
-      useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
+      await useAppStore.getState().moveSection(DRAFT_ID, 'b', 'up');
 
       expect(useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)).toBe(published);
     });
 
-    it('addSection coloca a nova seção no fim com a próxima ordem', () => {
-      useAppStore.getState().addSection(DRAFT_ID);
+    it('addSection coloca a nova seção no fim com a próxima ordem', async () => {
+      await useAppStore.getState().addSection(DRAFT_ID);
 
       const sections = useAppStore.getState().models.find((m) => m.id === DRAFT_ID)!.sections;
       expect(sections.map((sec) => sec.displayOrder)).toEqual([0, 1, 2, 3]);
       expect(sections[3].title).toBe('Nova seção');
     });
 
-    it('removeSection renumera para não deixar lacuna na ordem', () => {
+    it('removeSection renumera para não deixar lacuna na ordem', async () => {
       useAppStore.getState().removeSection(DRAFT_ID, 'a');
 
       expect(orderOf(DRAFT_ID)).toEqual([['b', 0], ['c', 1]]);
     });
 
-    it('os modelos de exemplo já têm ordem explícita, única e contígua', () => {
+    it('os modelos de exemplo já têm ordem explícita, única e contígua', async () => {
       for (const model of useAppStore.getState().models) {
         expect(model.sections.map((sec) => sec.displayOrder)).toEqual(model.sections.map((_, i) => i));
       }
@@ -516,8 +536,8 @@ describe('useAppStore construtor de modelos — #134', () => {
       }));
     });
 
-    it('addItem cria o item com as três flags desligadas', () => {
-      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+    it('addItem cria o item com as três flags desligadas', async () => {
+      await useAppStore.getState().addItem(DRAFT_ID, 'sec');
 
       expect(itemsOf(DRAFT_ID)[0]).toMatchObject({
         type: 'CONFORMITY',
@@ -527,29 +547,29 @@ describe('useAppStore construtor de modelos — #134', () => {
       });
     });
 
-    it('updateItem liga e desliga cada flag de forma independente', () => {
-      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+    it('updateItem liga e desliga cada flag de forma independente', async () => {
+      await useAppStore.getState().addItem(DRAFT_ID, 'sec');
       const id = itemsOf(DRAFT_ID)[0].id;
 
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { required: true });
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { required: true });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
       expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ required: true, observationRequiredOnFailure: true, evidenceRequiredOnFailure: false });
 
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: false });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: false });
       expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ required: true, observationRequiredOnFailure: false, evidenceRequiredOnFailure: true });
     });
 
-    it('trocar para um tipo sem "falha" desliga observação e evidência, mas mantém o obrigatório', () => {
-      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+    it('trocar para um tipo sem "falha" desliga observação e evidência, mas mantém o obrigatório', async () => {
+      await useAppStore.getState().addItem(DRAFT_ID, 'sec');
       const id = itemsOf(DRAFT_ID)[0].id;
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, {
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, {
         required: true,
         observationRequiredOnFailure: true,
         evidenceRequiredOnFailure: true,
       });
 
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'TEXT_SHORT' });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'TEXT_SHORT' });
 
       expect(itemsOf(DRAFT_ID)[0]).toMatchObject({
         type: 'TEXT_SHORT',
@@ -559,28 +579,28 @@ describe('useAppStore construtor de modelos — #134', () => {
       });
     });
 
-    it('voltar para conformidade não religa as flags sozinho', () => {
-      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+    it('voltar para conformidade não religa as flags sozinho', async () => {
+      await useAppStore.getState().addItem(DRAFT_ID, 'sec');
       const id = itemsOf(DRAFT_ID)[0].id;
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'NUMBER' });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { evidenceRequiredOnFailure: true });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'NUMBER' });
 
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'CONFORMITY' });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'CONFORMITY' });
 
       expect(itemsOf(DRAFT_ID)[0]).toMatchObject({ evidenceRequiredOnFailure: false, observationRequiredOnFailure: false });
     });
 
-    it('não é possível ligar a regra "na falha" num item que não é de conformidade', () => {
-      useAppStore.getState().addItem(DRAFT_ID, 'sec');
+    it('não é possível ligar a regra "na falha" num item que não é de conformidade', async () => {
+      await useAppStore.getState().addItem(DRAFT_ID, 'sec');
       const id = itemsOf(DRAFT_ID)[0].id;
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'DATE' });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { type: 'DATE' });
 
-      useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
+      await useAppStore.getState().updateItem(DRAFT_ID, 'sec', id, { observationRequiredOnFailure: true });
 
       expect(itemsOf(DRAFT_ID)[0].observationRequiredOnFailure).toBe(false);
     });
 
-    it('os modelos de exemplo têm as três flags definidas em todos os itens', () => {
+    it('os modelos de exemplo têm as três flags definidas em todos os itens', async () => {
       for (const model of useAppStore.getState().models) {
         for (const item of model.sections.flatMap((sec) => sec.items)) {
           expect(typeof item.required).toBe('boolean');
@@ -666,7 +686,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(await useAppStore.getState().publishModel(DRAFT_ID)).toEqual({ ok: false, error: 'Todo item precisa de um tipo de resposta (RN-016).' });
     });
 
-    it('os modelos de exemplo publicados passam na validação (sem problemas que bloqueiam)', () => {
+    it('os modelos de exemplo publicados passam na validação (sem problemas que bloqueiam)', async () => {
       const published = useAppStore.getState().models.filter((m) => m.status === 'PUBLICADO');
 
       expect(published.length).toBeGreaterThan(0);
@@ -680,20 +700,20 @@ describe('useAppStore construtor de modelos — #134', () => {
     const get = (id: string) => useAppStore.getState().models.find((m) => m.id === id)!;
     const snapshotOfPublished = () => structuredClone({ title: get(PUBLISHED_ID).title, sections: get(PUBLISHED_ID).sections });
 
-    it('modelo publicado fora de edição recusa toda alteração de conteúdo', () => {
+    it('modelo publicado fora de edição recusa toda alteração de conteúdo', async () => {
       const before = get(PUBLISHED_ID);
       const sectionId = before.sections[0].id;
       const itemId = before.sections[0].items[0].id;
       const api = useAppStore.getState();
 
       api.updateModelMeta(PUBLISHED_ID, { title: 'Alterado' });
-      api.addSection(PUBLISHED_ID);
+      await api.addSection(PUBLISHED_ID);
       api.removeSection(PUBLISHED_ID, sectionId);
-      api.moveSection(PUBLISHED_ID, sectionId, 'down');
+      await api.moveSection(PUBLISHED_ID, sectionId, 'down');
       api.updateSectionTitle(PUBLISHED_ID, sectionId, 'Alterada');
-      api.addItem(PUBLISHED_ID, sectionId);
+      await api.addItem(PUBLISHED_ID, sectionId);
       api.removeItem(PUBLISHED_ID, sectionId, itemId);
-      api.updateItem(PUBLISHED_ID, sectionId, itemId, { title: 'Alterado', required: false });
+      await api.updateItem(PUBLISHED_ID, sectionId, itemId, { title: 'Alterado', required: false });
 
       expect(get(PUBLISHED_ID)).toBe(before);
     });
@@ -708,7 +728,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(modelsApi.saveModel).not.toHaveBeenCalled();
     });
 
-    it('startNewModelVersion libera a edição e o modelo continua publicado e agendável', () => {
+    it('startNewModelVersion libera a edição e o modelo continua publicado e agendável', async () => {
       useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
 
       const model = get(PUBLISHED_ID);
@@ -716,12 +736,12 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(model.publishedSnapshot).toBeDefined();
     });
 
-    it('com a nova versão aberta, as alterações valem na cópia de trabalho e não na publicada', () => {
+    it('com a nova versão aberta, as alterações valem na cópia de trabalho e não na publicada', async () => {
       const published = snapshotOfPublished();
       useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
 
       useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Nova versão do modelo' });
-      useAppStore.getState().addSection(PUBLISHED_ID);
+      await useAppStore.getState().addSection(PUBLISHED_ID);
 
       const model = get(PUBLISHED_ID);
       expect(model.title).toBe('Nova versão do modelo');
@@ -730,7 +750,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(model.publishedSnapshot?.sections).toHaveLength(published.sections.length);
     });
 
-    it('startNewModelVersion não faz nada num rascunho', () => {
+    it('startNewModelVersion não faz nada num rascunho', async () => {
       const before = get(DRAFT_ID);
 
       useAppStore.getState().startNewModelVersion(DRAFT_ID);
@@ -738,11 +758,11 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(get(DRAFT_ID)).toBe(before);
     });
 
-    it('discardNewModelVersion restaura a versão publicada e trava de novo', () => {
+    it('discardNewModelVersion restaura a versão publicada e trava de novo', async () => {
       const published = snapshotOfPublished();
       useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
       useAppStore.getState().updateModelMeta(PUBLISHED_ID, { title: 'Vai ser descartado' });
-      useAppStore.getState().addSection(PUBLISHED_ID);
+      await useAppStore.getState().addSection(PUBLISHED_ID);
 
       useAppStore.getState().discardNewModelVersion(PUBLISHED_ID);
 
@@ -765,7 +785,7 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(modelsApi.updateModelMeta).not.toHaveBeenCalled();
     });
 
-    it('registra no histórico quando uma nova versão é iniciada e descartada', () => {
+    it('registra no histórico quando uma nova versão é iniciada e descartada', async () => {
       useAppStore.getState().startNewModelVersion(PUBLISHED_ID);
       useAppStore.getState().discardNewModelVersion(PUBLISHED_ID);
 
