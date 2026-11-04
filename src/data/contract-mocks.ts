@@ -114,6 +114,7 @@ export function toDomainEquipment(equipment: ContractEquipment): Equipment {
     tipo: equipment.assetNumber ?? undefined,
     qrCode: equipment.qrCode,
     ativo: equipment.status === 'ACTIVE',
+    version: equipment.version,
   };
 }
 

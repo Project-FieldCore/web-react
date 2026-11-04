@@ -36,6 +36,7 @@ import {
 import { login as apiLogin, logout as apiLogout, refresh as apiRefresh } from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
+import * as equipmentApi from '@/lib/equipment-api';
 import * as usersApi from '@/lib/users-api';
 import * as modelsApi from '@/lib/models-api';
 import type { NewModelInput } from '@/lib/models-api';
@@ -87,6 +88,10 @@ interface AppState {
   locationsError: string | null;
   loadLocations: () => Promise<void>;
   equipment: Equipment[];
+  /** Carga da lista de equipamentos pela API (tela /equipment e detalhe do local). */
+  equipmentStatus: 'idle' | 'loading' | 'ready' | 'error';
+  equipmentError: string | null;
+  loadEquipment: () => Promise<void>;
   users: User[];
   /** Carga da lista de usuários pela API (tela /users). */
   usersStatus: 'idle' | 'loading' | 'ready' | 'error';
@@ -99,6 +104,7 @@ interface AppState {
   mergeUsers: (items: User[]) => void;
   mergeClients: (items: Client[]) => void;
   mergeLocations: (items: Location[]) => void;
+  mergeEquipment: (items: Equipment[]) => void;
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
@@ -126,11 +132,12 @@ interface AppState {
   updateLocation: (id: string, patch: Partial<Pick<Location, 'nome' | 'endereco'>>) => Promise<Result>;
   setLocationActive: (id: string, ativo: boolean) => Promise<Result>;
 
-  // --- cadastro de equipamentos (RN-010/011/013) — ainda mock: o backend não
-  // expõe nenhuma rota de equipamento, nem placeholder (ver #133). ---
-  createEquipment: (localId: string, nome: string, qrCode: string, tipo?: string) => ResultWithId;
-  updateEquipment: (id: string, patch: Partial<Pick<Equipment, 'nome' | 'qrCode' | 'tipo'>>) => Result;
-  setEquipmentActive: (id: string, ativo: boolean) => void;
+  // --- cadastro de equipamentos (RN-010/011/013) — integrado à API ---
+  createEquipment: (localId: string, nome: string, qrCode: string, tipo?: string) => Promise<ResultWithId>;
+  updateEquipment: (id: string, patch: Partial<Pick<Equipment, 'nome' | 'tipo'>>) => Promise<Result>;
+  /** Atribui/edita QR via PATCH /equipment/{id}/qr-code (409 QR_CODE_ALREADY_EXISTS). */
+  assignEquipmentQrCode: (id: string, qrCode: string) => Promise<Result>;
+  setEquipmentActive: (id: string, ativo: boolean) => Promise<Result>;
 
   // --- cadastro de usuários (RN-001/002/003/007) — integrado à API (#133) ---
   createUser: (nome: string, email: string, role: UserRole, senha: string) => Promise<ResultWithId>;
@@ -310,6 +317,13 @@ export const useAppStore = create<AppState>()(
     }
   }
 
+  // Mesma ideia para equipamentos (409 VERSION_CONFLICT).
+  async function reloadEquipmentOnVersionConflict(error: unknown) {
+    if (error instanceof ApiError && error.code === 'VERSION_CONFLICT') {
+      await get().loadEquipment();
+    }
+  }
+
   // Compartilhada por createUser e approveAccessRequest — evita duplicar as
   // validações de cadastro central de usuários (03 - Problema: duplicidade).
   // Integrado à API (#133) — ver src/lib/users-api.ts para o contrato assumido.
@@ -346,6 +360,8 @@ export const useAppStore = create<AppState>()(
     locationsStatus: 'idle',
     locationsError: null,
     equipment: MOCK_EQUIPMENT,
+    equipmentStatus: 'idle',
+    equipmentError: null,
     users: MOCK_USERS,
     usersStatus: 'idle',
     usersError: null,
@@ -518,36 +534,68 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
-    // RN-010: todo equipamento pertence a um local no MVP. RN-011: QR Code único.
-    createEquipment: (localId, nome, qrCode, tipo) => {
+    // RN-010: todo equipamento pertence a um local. RN-011: QR único (API).
+    createEquipment: async (localId, nome, qrCode, tipo) => {
       const location = get().locations.find((l) => l.id === localId);
       if (!location) return { ok: false, error: 'Local não encontrado (RN-010).' };
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do equipamento.' };
       const qr = qrCode.trim();
       if (!qr) return { ok: false, error: 'Informe o código QR do equipamento.' };
-      const duplicate = get().equipment.some((e) => e.qrCode.toLowerCase() === qr.toLowerCase());
-      if (duplicate) return { ok: false, error: 'Já existe um equipamento com esse código QR (RN-011).' };
-      const id = newId('eq');
-      set((s) => ({ equipment: [...s.equipment, { id, localId, nome: nome.trim(), tipo: tipo?.trim() || undefined, qrCode: qr, ativo: true }] }));
-      pushAudit('CRIOU', 'Equipamento', id, `${nome.trim()} · QR ${qr}`);
-      return { ok: true, id };
-    },
-    updateEquipment: (id, patch) => {
-      if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do equipamento.' };
-      if (patch.qrCode !== undefined) {
-        const qr = patch.qrCode.trim();
-        if (!qr) return { ok: false, error: 'Informe o código QR do equipamento.' };
-        const duplicate = get().equipment.some((e) => e.id !== id && e.qrCode.toLowerCase() === qr.toLowerCase());
-        if (duplicate) return { ok: false, error: 'Já existe um equipamento com esse código QR (RN-011).' };
-        patch = { ...patch, qrCode: qr };
+
+      let equipment: Equipment;
+      try {
+        equipment = await equipmentApi.createEquipment(localId, nome.trim(), qr, tipo?.trim() || undefined);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível criar o equipamento. Tente novamente.');
       }
-      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+      set((s) => ({ equipment: [...s.equipment, equipment] }));
+      pushAudit('CRIOU', 'Equipamento', equipment.id, `${equipment.nome} · QR ${equipment.qrCode}`);
+      return { ok: true, id: equipment.id };
+    },
+    updateEquipment: async (id, patch) => {
+      if (patch.nome !== undefined && !patch.nome.trim()) return { ok: false, error: 'Informe o nome do equipamento.' };
+      const version = get().equipment.find((e) => e.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de equipamentos e tente de novo.' };
+      let equipment: Equipment;
+      try {
+        equipment = await equipmentApi.updateEquipment(id, patch, version);
+      } catch (error) {
+        await reloadEquipmentOnVersionConflict(error);
+        return toErrorResult(error, 'Não foi possível salvar as alterações. Tente novamente.');
+      }
+      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? equipment : e)) }));
       pushAudit('ATUALIZOU', 'Equipamento', id);
       return { ok: true };
     },
-    setEquipmentActive: (id, ativo) => {
-      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? { ...e, ativo } : e)) }));
+    assignEquipmentQrCode: async (id, qrCode) => {
+      const qr = qrCode.trim();
+      if (!qr) return { ok: false, error: 'Informe o código QR do equipamento.' };
+      const version = get().equipment.find((e) => e.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de equipamentos e tente de novo.' };
+      let equipment: Equipment;
+      try {
+        equipment = await equipmentApi.assignEquipmentQrCode(id, qr, version);
+      } catch (error) {
+        await reloadEquipmentOnVersionConflict(error);
+        return toErrorResult(error, 'Não foi possível atualizar o código QR. Tente novamente.');
+      }
+      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? equipment : e)) }));
+      pushAudit('ATUALIZOU', 'Equipamento', id, `QR ${qr}`);
+      return { ok: true };
+    },
+    setEquipmentActive: async (id, ativo) => {
+      const version = get().equipment.find((e) => e.id === id)?.version;
+      if (version === undefined) return { ok: false, error: 'Recarregue a lista de equipamentos e tente de novo.' };
+      let equipment: Equipment;
+      try {
+        equipment = await equipmentApi.setEquipmentActive(id, ativo, version);
+      } catch (error) {
+        await reloadEquipmentOnVersionConflict(error);
+        return toErrorResult(error, 'Não foi possível alterar o status do equipamento. Tente novamente.');
+      }
+      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? equipment : e)) }));
       pushAudit(ativo ? 'ATIVOU' : 'INATIVOU', 'Equipamento', id);
+      return { ok: true };
     },
 
     // Substitui a lista pelo cadastro real da API. Até a carga terminar a tela
@@ -567,6 +615,7 @@ export const useAppStore = create<AppState>()(
     mergeUsers: (items) => set((s) => ({ users: upsertById(s.users, items) })),
     mergeClients: (items) => set((s) => ({ clients: upsertById(s.clients, items) })),
     mergeLocations: (items) => set((s) => ({ locations: upsertById(s.locations, items) })),
+    mergeEquipment: (items) => set((s) => ({ equipment: upsertById(s.equipment, items) })),
 
     loadLocations: async () => {
       // Só mostra loading na primeira carga; recargas (ex.: após conflito) são silenciosas.
@@ -577,6 +626,19 @@ export const useAppStore = create<AppState>()(
       } catch (error) {
         const { error: message } = toErrorResult(error, 'Não foi possível carregar os locais. Tente novamente.');
         set({ locationsStatus: 'error', locationsError: message });
+      }
+    },
+
+    // Substitui a lista pelo cadastro real da API. Até a carga terminar a tela
+    // /equipment mostra loading — nunca os dados de exemplo.
+    loadEquipment: async () => {
+      if (get().equipmentStatus !== 'ready') set({ equipmentStatus: 'loading', equipmentError: null });
+      try {
+        const equipment = await equipmentApi.listEquipment();
+        set({ equipment, equipmentStatus: 'ready', equipmentError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os equipamentos. Tente novamente.');
+        set({ equipmentStatus: 'error', equipmentError: message });
       }
     },
 

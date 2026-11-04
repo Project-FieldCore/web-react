@@ -22,6 +22,13 @@ vi.mock('@/lib/users-api', () => ({
   updateUser: vi.fn(),
   setUserStatus: vi.fn(),
 }));
+vi.mock('@/lib/equipment-api', () => ({
+  listEquipment: vi.fn(),
+  createEquipment: vi.fn(),
+  updateEquipment: vi.fn(),
+  setEquipmentActive: vi.fn(),
+  assignEquipmentQrCode: vi.fn(),
+}));
 
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';

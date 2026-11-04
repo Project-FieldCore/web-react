@@ -138,6 +138,8 @@ export interface Equipment {
   tipo?: string;
   qrCode: string;
   ativo: boolean;
+  /** Versão da API (trava otimista): obrigatória para editar, status e QR. */
+  version?: number;
 }
 
 export type ConformityAnswer = 'CONFORME' | 'NAO_CONFORME' | 'NAO_APLICAVEL';
