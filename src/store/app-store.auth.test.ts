@@ -159,4 +159,28 @@ describe('useAppStore auth', () => {
     expect(useAppStore.getState().currentUser).toBeNull();
     expect(apiLogoutMock).not.toHaveBeenCalled();
   });
+
+  describe('resetPassword (RN-007)', () => {
+    it('recusa senha menor que o mínimo', () => {
+      const result = useAppStore.getState().resetPassword('admin@fieldcore.com', '12345');
+
+      expect(result).toEqual({ ok: false, error: 'A nova senha deve ter ao menos 6 caracteres.' });
+    });
+
+    it('sempre retorna ok sem enumerar e-mail e sem gravar senha no cliente', () => {
+      useAppStore.setState({
+        users: [ADMIN_USER],
+        auditEvents: [],
+      });
+
+      const result = useAppStore.getState().resetPassword('admin@fieldcore.com', 'novaSenha99');
+
+      expect(result).toEqual({ ok: true });
+      expect(useAppStore.getState().auditEvents).toEqual([]);
+    });
+
+    it('também retorna ok para e-mail inexistente (sem enumeração)', () => {
+      expect(useAppStore.getState().resetPassword('naoexiste@fieldcore.com', 'novaSenha99')).toEqual({ ok: true });
+    });
+  });
 });

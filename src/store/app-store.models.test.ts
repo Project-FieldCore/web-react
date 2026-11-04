@@ -93,7 +93,11 @@ describe('useAppStore construtor de modelos — #134', () => {
 
       const result = await useAppStore.getState().createDraftModel(input);
 
-      expect(result).toEqual({ ok: false, error: 'Já existe um modelo com esse título. Escolha outro título.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Já existe um modelo com esse título. Escolha outro título.',
+        code: 'TEMPLATE_TITLE_ALREADY_EXISTS',
+      });
       expect(useAppStore.getState().models).toHaveLength(before);
     });
 
@@ -227,7 +231,11 @@ describe('useAppStore construtor de modelos — #134', () => {
 
       const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Repetido' });
 
-      expect(result).toEqual({ ok: false, error: 'Já existe um modelo com esse título. Escolha outro título.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Já existe um modelo com esse título. Escolha outro título.',
+        code: 'TEMPLATE_TITLE_ALREADY_EXISTS',
+      });
       expect(useAppStore.getState().models.find((m) => m.id === 'srv-1')!.title).toBe('Original');
       expect(modelsApi.getModel).not.toHaveBeenCalled();
     });
@@ -240,7 +248,11 @@ describe('useAppStore construtor de modelos — #134', () => {
 
       const result = await useAppStore.getState().saveModelMeta('srv-1', { title: 'Minha edição' });
 
-      expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Este registro foi alterado por outra pessoa.',
+        code: 'VERSION_CONFLICT',
+      });
       expect(useAppStore.getState().models.find((m) => m.id === 'srv-1')).toMatchObject({ title: 'Editado por outra pessoa', lockVersion: 9 });
     });
 

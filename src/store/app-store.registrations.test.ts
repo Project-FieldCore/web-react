@@ -90,7 +90,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
 
       const result = await useAppStore.getState().createClient('Cliente X', '12.345.678/0001-90');
 
-      expect(result).toEqual({ ok: false, error: 'Já existe um cliente com esse CNPJ.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Já existe um cliente com esse CNPJ.',
+        code: 'DOCUMENT_ALREADY_EXISTS',
+      });
     });
 
     describe('com clientes carregados da API (com version)', () => {
@@ -150,7 +154,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
         const result = await useAppStore.getState().updateClient('cli-1', { nome: 'Acme Ltda' });
         unsubscribe();
 
-        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(result).toEqual({
+          ok: false,
+          error: 'Este registro foi alterado por outra pessoa.',
+          code: 'VERSION_CONFLICT',
+        });
         expect(useAppStore.getState().clients).toEqual([fresh]);
         expect(statuses).not.toContain('loading');
       });
@@ -252,7 +260,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
 
       const result = await useAppStore.getState().createLocation(EXISTING_CLIENT_ID, 'Depósito');
 
-      expect(result).toEqual({ ok: false, error: 'Já existe um local com esse nome para este cliente.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Já existe um local com esse nome para este cliente.',
+        code: 'SITE_NAME_ALREADY_EXISTS',
+      });
     });
 
     describe('com locais carregados da API (com version)', () => {
@@ -312,7 +324,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
         const result = await useAppStore.getState().setLocationActive('loc-1', false);
         unsubscribe();
 
-        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(result).toEqual({
+          ok: false,
+          error: 'Este registro foi alterado por outra pessoa.',
+          code: 'VERSION_CONFLICT',
+        });
         expect(useAppStore.getState().locations).toEqual([fresh]);
         expect(statuses).not.toContain('loading');
       });
@@ -416,7 +432,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
 
       const result = await useAppStore.getState().createUser('Fulano', 'novo@fieldcore.com', 'SUPERVISOR', 'senha1234');
 
-      expect(result).toEqual({ ok: false, error: 'Já existe um usuário com esse e-mail.' });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Já existe um usuário com esse e-mail.',
+        code: 'EMAIL_ALREADY_EXISTS',
+      });
     });
 
     describe('com usuários carregados da API (com version)', () => {
@@ -469,7 +489,11 @@ describe('useAppStore cadastros (clientes/locais/usuários) — #133', () => {
         const result = await useAppStore.getState().updateUser('usr-1', { nome: 'Ana Maria' });
         unsubscribe();
 
-        expect(result).toEqual({ ok: false, error: 'Este registro foi alterado por outra pessoa.' });
+        expect(result).toEqual({
+          ok: false,
+          error: 'Este registro foi alterado por outra pessoa.',
+          code: 'VERSION_CONFLICT',
+        });
         expect(useAppStore.getState().users).toEqual([fresh]);
         expect(statuses).not.toContain('loading');
       });
