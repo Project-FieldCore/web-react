@@ -76,6 +76,13 @@ export interface InspectionModel {
    * listar versões); modelos sem ele são agendados só na tela.
    */
   templateVersionId?: string;
+  /**
+   * UUID da `template_version` unpublished (DRAFT). Usado em
+   * `POST /template-versions/{draftVersionId}/sections` e itens sob a seção.
+   */
+  draftVersionId?: string;
+  /** UUID da versão com maior `version_number` (publicado ou draft). */
+  latestVersionId?: string;
   sections: ModelSection[];
   updatedAt: string;
   /**

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createItem, listItems } from './items-api';
+import { createItem, listItems, updateItem } from './items-api';
 import { setAuthToken } from './auth-token';
 import type { ModelItem } from '@/types';
 
@@ -126,6 +126,43 @@ describe('items-api (itens do checklist)', () => {
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).options).toEqual(['A', 'B']);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).options).toBeUndefined();
+  });
+
+  it('updateItem PATCH parcial com flags e responseType', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { ...API_ITEM, required: false, evidenceRequiredOnFailure: false, title: 'Atualizado' })
+    );
+    global.fetch = fetchMock;
+
+    const updated = await updateItem('sec-1', 'itm-1', {
+      title: 'Atualizado',
+      required: false,
+      evidenceRequiredOnFailure: false,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/template-sections\/sec-1\/items\/itm-1$/);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).toEqual({
+      title: 'Atualizado',
+      required: false,
+      evidenceRequiredOnFailure: false,
+    });
+    expect(updated.title).toBe('Atualizado');
+    expect(updated.required).toBe(false);
+  });
+
+  it('updateItem zera failure flags ao mudar tipo para fora de CONFORMITY', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ...API_ITEM, responseType: 'TEXT_SHORT' }));
+    global.fetch = fetchMock;
+
+    await updateItem('sec-1', 'itm-1', { type: 'TEXT_SHORT' });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      responseType: 'TEXT_SHORT',
+      observationRequiredOnFailure: false,
+      evidenceRequiredOnFailure: false,
+    });
   });
 
   it('traduz os erros de alternativas, ordem, item e modelo não editável para português', async () => {

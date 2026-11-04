@@ -66,6 +66,7 @@ export default function ModelBuilderPage() {
   const [orderNotice, setOrderNotice] = useState<string | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [metaNotice, setMetaNotice] = useState<string | null>(null);
+  const [structureError, setStructureError] = useState<string | null>(null);
 
   // Carrega o modelo pela API (link direto/refresh). Modelos locais (dados de exemplo) não existem na API.
   useEffect(() => {
@@ -114,8 +115,13 @@ export default function ModelBuilderPage() {
   // RN-017: as seções são exibidas na ordem explícita (displayOrder).
   const orderedSections = normalizeSectionOrder(model.sections);
 
-  function handleMoveSection(sectionId: string, title: string, index: number, direction: MoveDirection) {
-    moveSection(model!.id, sectionId, direction);
+  async function handleMoveSection(sectionId: string, title: string, index: number, direction: MoveDirection) {
+    const result = await moveSection(model!.id, sectionId, direction);
+    if (!result.ok) {
+      setStructureError(result.error);
+      return;
+    }
+    setStructureError(null);
     const position = direction === 'up' ? index : index + 2;
     setOrderNotice(`Seção "${title}" movida para a posição ${position}.`);
   }
@@ -256,6 +262,11 @@ export default function ModelBuilderPage() {
           )}
 
           <fieldset disabled={locked} className="min-w-0 border-0 p-0 m-0">
+            {structureError && (
+              <div className="mb-3">
+                <InlineError message={structureError} />
+              </div>
+            )}
             {orderedSections.length > 1 && (
               <p role="status" aria-live="polite" className="text-xs text-emerald-700 font-semibold mb-2 min-h-4">
                 {orderNotice}
@@ -276,7 +287,7 @@ export default function ModelBuilderPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => handleMoveSection(section.id, section.title, sIdx, 'up')}
+                      onClick={() => void handleMoveSection(section.id, section.title, sIdx, 'up')}
                       disabled={sIdx === 0}
                       aria-label={`Mover a seção ${section.title} para cima`}
                       title="Mover para cima"
@@ -286,7 +297,7 @@ export default function ModelBuilderPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleMoveSection(section.id, section.title, sIdx, 'down')}
+                      onClick={() => void handleMoveSection(section.id, section.title, sIdx, 'down')}
                       disabled={sIdx === orderedSections.length - 1}
                       aria-label={`Mover a seção ${section.title} para baixo`}
                       title="Mover para baixo"
@@ -308,8 +319,14 @@ export default function ModelBuilderPage() {
                     <div key={item.id} id={`item-${item.id}`} tabIndex={-1} className="border border-slate-200 rounded-xl p-3.5 bg-slate-50 outline-none focus-visible:ring-2 focus-visible:ring-navy-700">
                       <div className="flex items-center gap-2 mb-2.5">
                         <input
-                          value={item.title}
-                          onChange={(e) => updateItem(model.id, section.id, item.id, { title: e.target.value })}
+                          key={`${item.id}-title-${item.title}`}
+                          defaultValue={item.title}
+                          onBlur={(e) => {
+                            if (e.target.value === item.title) return;
+                            void updateItem(model.id, section.id, item.id, { title: e.target.value }).then((result) => {
+                              setStructureError(result.ok ? null : result.error);
+                            });
+                          }}
                           className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white"
                         />
                         <button onClick={() => removeItem(model.id, section.id, item.id)} className="text-xs font-semibold text-red-600 px-2 shrink-0">
@@ -319,7 +336,11 @@ export default function ModelBuilderPage() {
                       <div className="flex items-center gap-4 flex-wrap">
                         <select
                           value={item.type}
-                          onChange={(e) => updateItem(model.id, section.id, item.id, { type: e.target.value as ItemType })}
+                          onChange={(e) => {
+                            void updateItem(model.id, section.id, item.id, { type: e.target.value as ItemType }).then((result) => {
+                              setStructureError(result.ok ? null : result.error);
+                            });
+                          }}
                           className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
                         >
                           {ITEM_TYPES.map((t) => (
@@ -330,7 +351,11 @@ export default function ModelBuilderPage() {
                           <input
                             type="checkbox"
                             checked={item.required}
-                            onChange={(e) => updateItem(model.id, section.id, item.id, { required: e.target.checked })}
+                            onChange={(e) => {
+                              void updateItem(model.id, section.id, item.id, { required: e.target.checked }).then((result) => {
+                                setStructureError(result.ok ? null : result.error);
+                              });
+                            }}
                           />
                           Obrigatório
                         </label>
@@ -340,7 +365,13 @@ export default function ModelBuilderPage() {
                               <input
                                 type="checkbox"
                                 checked={item.observationRequiredOnFailure}
-                                onChange={(e) => updateItem(model.id, section.id, item.id, { observationRequiredOnFailure: e.target.checked })}
+                                onChange={(e) => {
+                                  void updateItem(model.id, section.id, item.id, {
+                                    observationRequiredOnFailure: e.target.checked,
+                                  }).then((result) => {
+                                    setStructureError(result.ok ? null : result.error);
+                                  });
+                                }}
                               />
                               Exige observação se não conforme
                             </label>
@@ -348,7 +379,13 @@ export default function ModelBuilderPage() {
                               <input
                                 type="checkbox"
                                 checked={item.evidenceRequiredOnFailure}
-                                onChange={(e) => updateItem(model.id, section.id, item.id, { evidenceRequiredOnFailure: e.target.checked })}
+                                onChange={(e) => {
+                                  void updateItem(model.id, section.id, item.id, {
+                                    evidenceRequiredOnFailure: e.target.checked,
+                                  }).then((result) => {
+                                    setStructureError(result.ok ? null : result.error);
+                                  });
+                                }}
                               />
                               Exige evidência se não conforme (RN-039)
                             </label>
@@ -364,15 +401,17 @@ export default function ModelBuilderPage() {
                         <div className="mt-2.5">
                           <label className="text-xs font-semibold text-slate-600 block mb-1">Alternativas (separadas por vírgula)</label>
                           <input
-                            value={(item.options ?? []).join(', ')}
-                            onChange={(e) =>
-                              updateItem(model.id, section.id, item.id, {
-                                options: e.target.value
-                                  .split(',')
-                                  .map((o) => o.trim())
-                                  .filter(Boolean),
-                              })
-                            }
+                            key={`${item.id}-options-${(item.options ?? []).join('|')}`}
+                            defaultValue={(item.options ?? []).join(', ')}
+                            onBlur={(e) => {
+                              const options = e.target.value
+                                .split(',')
+                                .map((o) => o.trim())
+                                .filter(Boolean);
+                              void updateItem(model.id, section.id, item.id, { options }).then((result) => {
+                                setStructureError(result.ok ? null : result.error);
+                              });
+                            }}
                             placeholder="Ex.: Boa, Regular, Ruim"
                             className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white"
                           />
@@ -380,7 +419,14 @@ export default function ModelBuilderPage() {
                       )}
                     </div>
                   ))}
-                  <button onClick={() => addItem(model.id, section.id)} className="text-sm font-semibold text-navy-700">
+                  <button
+                    onClick={() => {
+                      void addItem(model.id, section.id).then((result) => {
+                        setStructureError(result.ok ? null : result.error);
+                      });
+                    }}
+                    className="text-sm font-semibold text-navy-700"
+                  >
                     + Adicionar item
                   </button>
                 </div>
@@ -389,7 +435,11 @@ export default function ModelBuilderPage() {
 
             <button
               id="add-section"
-              onClick={() => addSection(model.id)}
+              onClick={() => {
+                void addSection(model.id).then((result) => {
+                  setStructureError(result.ok ? null : result.error);
+                });
+              }}
               className="w-full border-2 border-dashed border-slate-300 rounded-2xl py-4 text-sm font-bold text-slate-500 hover:border-navy-700 hover:text-navy-700 transition-colors"
             >
               + Adicionar seção
