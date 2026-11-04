@@ -25,10 +25,13 @@ export default function SiteDetailPage() {
   const locationsError = useAppStore((s) => s.locationsError);
   const loadLocations = useAppStore((s) => s.loadLocations);
   const equipmentList = useAppStore((s) => s.equipment.filter((e) => e.localId === siteId));
+  const equipmentStatus = useAppStore((s) => s.equipmentStatus);
+  const equipmentError = useAppStore((s) => s.equipmentError);
+  const loadEquipment = useAppStore((s) => s.loadEquipment);
   const updateLocation = useAppStore((s) => s.updateLocation);
   const setLocationActive = useAppStore((s) => s.setLocationActive);
   const createEquipment = useAppStore((s) => s.createEquipment);
-  const updateEquipment = useAppStore((s) => s.updateEquipment);
+  const assignEquipmentQrCode = useAppStore((s) => s.assignEquipmentQrCode);
   const setEquipmentActive = useAppStore((s) => s.setEquipmentActive);
 
   const [showNewEquipment, setShowNewEquipment] = useState(false);
@@ -37,11 +40,12 @@ export default function SiteDetailPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Cliente e local vêm da API — carrega ao abrir (inclusive em link direto ou refresh).
+  // Cliente, local e equipamentos vêm da API — carrega ao abrir (link direto/refresh).
   useEffect(() => {
     void loadClients();
     void loadLocations();
-  }, [loadClients, loadLocations]);
+    void loadEquipment();
+  }, [loadClients, loadLocations, loadEquipment]);
 
   // Sincroniza os campos quando o local chega (ou muda) da API.
   useEffect(() => {
@@ -143,7 +147,19 @@ export default function SiteDetailPage() {
         </button>
       </div>
 
-      {equipmentList.length === 0 ? (
+      {(equipmentStatus === 'idle' || equipmentStatus === 'loading') && equipmentList.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <LoadingState label="Carregando equipamentos..." />
+        </div>
+      ) : equipmentStatus === 'error' && equipmentList.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-2xl">
+          <ErrorState
+            title="Não foi possível carregar os equipamentos"
+            message={equipmentError ?? 'Tente novamente.'}
+            onRetry={() => void loadEquipment()}
+          />
+        </div>
+      ) : equipmentList.length === 0 ? (
         <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-slate-400">
           Nenhum equipamento cadastrado para este local ainda.
         </div>
@@ -151,11 +167,11 @@ export default function SiteDetailPage() {
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <table className="hidden xl:table w-full text-sm table-fixed">
             <colgroup>
-              <col className="w-[28%]" />
-              <col className="w-[20%]" />
-              <col className="w-[22%]" />
-              <col className="w-[14%]" />
+              <col className="w-[24%]" />
               <col className="w-[16%]" />
+              <col className="w-[28%]" />
+              <col className="w-[14%]" />
+              <col className="w-[18%]" />
             </colgroup>
             <thead>
               <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-100">
@@ -168,7 +184,19 @@ export default function SiteDetailPage() {
             </thead>
             <tbody>
               {equipmentList.map((eq) => (
-                <EquipmentRow key={eq.id} eq={eq} onUpdate={updateEquipment} onToggle={(ativo) => setEquipmentActive(eq.id, ativo)} />
+                <EquipmentRow
+                  key={eq.id}
+                  eq={eq}
+                  onAssignQr={assignEquipmentQrCode}
+                  onToggle={async (ativo) => {
+                    const result = await setEquipmentActive(eq.id, ativo);
+                    if (!result.ok) setEditError(result.error);
+                    else {
+                      setEditError(null);
+                      setNotice(ativo ? 'Equipamento ativado.' : 'Equipamento inativado.');
+                    }
+                  }}
+                />
               ))}
             </tbody>
           </table>
@@ -180,10 +208,18 @@ export default function SiteDetailPage() {
                   <ActiveBadge ativo={eq.ativo} />
                 </div>
                 <div className="text-xs text-slate-500 mb-1">{eq.tipo ?? '—'}</div>
-                <div className="text-xs font-mono text-slate-400 mb-3">{eq.qrCode}</div>
+                <QrField
+                  qrCode={eq.qrCode}
+                  onSave={async (next) => {
+                    const result = await assignEquipmentQrCode(eq.id, next);
+                    if (!result.ok) return result.error;
+                    setNotice('Código QR atualizado.');
+                    return null;
+                  }}
+                />
                 <button
-                  onClick={() => setEquipmentActive(eq.id, !eq.ativo)}
-                  className={`text-xs font-semibold ${eq.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
+                  onClick={() => void setEquipmentActive(eq.id, !eq.ativo)}
+                  className={`text-xs font-semibold mt-3 ${eq.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
                 >
                   {eq.ativo ? 'Inativar' : 'Ativar'}
                 </button>
@@ -194,45 +230,93 @@ export default function SiteDetailPage() {
       )}
 
       {showNewEquipment && (
-        <NewEquipmentModal localId={location.id} onClose={() => setShowNewEquipment(false)} onCreate={createEquipment} />
+        <NewEquipmentModal
+          localId={location.id}
+          onClose={() => setShowNewEquipment(false)}
+          onCreate={createEquipment}
+          onCreated={() => setNotice('Equipamento criado.')}
+        />
       )}
+    </div>
+  );
+}
+
+function QrField({
+  qrCode,
+  onSave,
+}: {
+  qrCode: string;
+  onSave: (next: string) => Promise<string | null>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
+    const value = e.target.value;
+    if (value === qrCode) return;
+    const message = await onSave(value);
+    setError(message);
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(qrCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Não foi possível copiar o código QR.');
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input
+          key={qrCode}
+          defaultValue={qrCode}
+          onBlur={(e) => void handleBlur(e)}
+          className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono bg-slate-50"
+          aria-label="Código QR"
+        />
+        <button type="button" onClick={() => void handleCopy()} className="shrink-0 text-[11px] font-bold text-navy-700">
+          {copied ? 'Copiado' : 'Copiar'}
+        </button>
+      </div>
+      {error && <p className="text-[11px] text-red-600 font-semibold mt-1">{error}</p>}
     </div>
   );
 }
 
 function EquipmentRow({
   eq,
-  onUpdate,
+  onAssignQr,
   onToggle,
 }: {
   eq: { id: string; nome: string; tipo?: string; qrCode: string; ativo: boolean };
-  onUpdate: (id: string, patch: { nome?: string; qrCode?: string; tipo?: string }) => { ok: true } | { ok: false; error: string };
-  onToggle: (ativo: boolean) => void;
+  onAssignQr: (id: string, qrCode: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  onToggle: (ativo: boolean) => void | Promise<void>;
 }) {
-  const [error, setError] = useState<string | null>(null);
-
-  function handleQrBlur(e: React.FocusEvent<HTMLInputElement>) {
-    const value = e.target.value;
-    if (value === eq.qrCode) return;
-    const result = onUpdate(eq.id, { qrCode: value });
-    setError(result.ok ? null : result.error);
-  }
-
   return (
     <tr className="border-b border-slate-50 last:border-0 hover:bg-slate-50 align-top">
       <td className="px-5 py-3 font-semibold text-navy-900 truncate">{eq.nome}</td>
       <td className="px-5 py-3 text-slate-600 truncate">{eq.tipo ?? '—'}</td>
       <td className="px-5 py-3">
-        <input
-          defaultValue={eq.qrCode}
-          onBlur={handleQrBlur}
-          className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono bg-slate-50"
+        <QrField
+          qrCode={eq.qrCode}
+          onSave={async (next) => {
+            const result = await onAssignQr(eq.id, next);
+            return result.ok ? null : result.error;
+          }}
         />
-        {error && <p className="text-[11px] text-red-600 font-semibold mt-1">{error}</p>}
       </td>
-      <td className="px-5 py-3"><ActiveBadge ativo={eq.ativo} /></td>
       <td className="px-5 py-3">
-        <button onClick={() => onToggle(!eq.ativo)} className={`text-xs font-semibold ${eq.ativo ? 'text-slate-500' : 'text-emerald-600'}`}>
+        <ActiveBadge ativo={eq.ativo} />
+      </td>
+      <td className="px-5 py-3">
+        <button
+          onClick={() => void onToggle(!eq.ativo)}
+          className={`text-xs font-semibold ${eq.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
+        >
           {eq.ativo ? 'Inativar' : 'Ativar'}
         </button>
       </td>
@@ -244,29 +328,40 @@ function NewEquipmentModal({
   localId,
   onClose,
   onCreate,
+  onCreated,
 }: {
   localId: string;
   onClose: () => void;
-  onCreate: (localId: string, nome: string, qrCode: string, tipo?: string) => { ok: true; id: string } | { ok: false; error: string };
+  onCreate: (
+    localId: string,
+    nome: string,
+    qrCode: string,
+    tipo?: string
+  ) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  onCreated?: () => void;
 }) {
   const [nome, setNome] = useState('');
   const [tipo, setTipo] = useState('');
   const [qrCode, setQrCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const result = onCreate(localId, nome, qrCode, tipo || undefined);
+    setLoading(true);
+    const result = await onCreate(localId, nome, qrCode, tipo || undefined);
+    setLoading(false);
     if (!result.ok) {
       setError(result.error);
       return;
     }
+    onCreated?.();
     onClose();
   }
 
   return (
     <Modal title="Novo equipamento" onClose={onClose}>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={(e) => void handleSubmit(e)}>
         <Field label="Nome" required>
           <input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" required autoFocus />
         </Field>
@@ -277,8 +372,8 @@ function NewEquipmentModal({
           <input value={qrCode} onChange={(e) => setQrCode(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono" placeholder="QR-XXXXX" required />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
-        <button type="submit" className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1">
-          Criar equipamento
+        <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
+          {loading ? 'Criando...' : 'Criar equipamento'}
         </button>
       </form>
     </Modal>
