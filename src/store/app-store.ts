@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type {
   AccessRequest,
   Answer,
+  AnswerRevision,
   AuditEvent,
   Client,
   Criticidade,
@@ -46,6 +47,7 @@ import { isApiUuid } from '@/lib/api-id';
 import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-rules';
 import { blockingIssues, validateModel } from '@/lib/model-validation';
 import { activeTechnicians as listAssignable, assignBlockedReason, reassignBlockedReason } from '@/lib/technician-rules';
+import { buildRevision } from '@/lib/answer-history-rules';
 import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
 import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
 import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
@@ -119,6 +121,8 @@ interface AppState {
   models: InspectionModel[];
   inspections: Inspection[];
   auditEvents: AuditEvent[];
+  /** Histórico de alterações de resposta por inspeção (mais antigo primeiro). */
+  answerHistory: Record<string, AnswerRevision[]>;
   accessRequests: AccessRequest[];
   syncQueue: SyncQueueItem[];
   lastSyncAt: string | null;
@@ -384,6 +388,7 @@ export const useAppStore = create<AppState>()(
     modelLoad: { id: null, status: 'idle', error: null },
     inspections: MOCK_INSPECTIONS,
     auditEvents: MOCK_AUDIT_EVENTS,
+    answerHistory: {},
     accessRequests: MOCK_ACCESS_REQUESTS,
     syncQueue: [],
     lastSyncAt: null,
@@ -1294,14 +1299,25 @@ export const useAppStore = create<AppState>()(
 
     // RN-039: itens críticos não conformes exigem evidência anexada.
     saveAnswer: (inspectionId, itemId, patch) => {
+      let revision: AnswerRevision | undefined;
       set((s) => ({
         inspections: s.inspections.map((i) => {
           if (i.id !== inspectionId) return i;
           const prev: Answer = i.answers[itemId] ?? { itemId, evidenceCount: 0 };
           const answer: Answer = { ...prev, ...patch };
+          revision = buildRevision({
+            id: newId('rev'),
+            inspectionId,
+            itemId,
+            previous: i.answers[itemId],
+            next: answer,
+            autor: get().currentUser,
+            em: new Date().toISOString(),
+          });
           const status = i.status === 'ATRIBUIDA' || i.status === 'DEVOLVIDA' ? 'EM_ANDAMENTO' : i.status;
           return { ...i, status, answers: { ...i.answers, [itemId]: answer } };
         }),
+        answerHistory: revision ? { ...s.answerHistory, [inspectionId]: [...(s.answerHistory[inspectionId] ?? []), revision] } : s.answerHistory,
         syncQueue: [...s.syncQueue, { id: newId('sync'), inspectionId, descricao: 'Resposta do checklist', createdAt: new Date().toISOString() }],
       }));
     },

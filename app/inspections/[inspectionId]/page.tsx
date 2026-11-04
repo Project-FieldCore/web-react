@@ -11,6 +11,8 @@ import { ErrorState, InlineError } from '@/components/States';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { CancelInspectionDialog } from '@/components/inspections/CancelInspectionDialog';
 import { ReassignTechnicianDialog } from '@/components/inspections/ReassignTechnicianDialog';
+import { AnswerHistoryToggle } from '@/components/inspections/AnswerHistoryToggle';
+import { historyForItem } from '@/lib/answer-history-rules';
 import { canReassign } from '@/lib/technician-rules';
 import { CancelInspectionAction } from '@/components/inspections/CancelInspectionAction';
 import { CancellationInfo } from '@/components/inspections/CancellationInfo';
@@ -28,6 +30,7 @@ export default function InspectionReviewPage() {
   const router = useRouter();
 
   const inspection = useAppStore((s) => s.inspections.find((i) => i.id === inspectionId));
+  const answerHistory = useAppStore((s) => s.answerHistory[inspectionId]);
   const models = useAppStore((s) => s.models);
   const clients = useAppStore((s) => s.clients);
   const locations = useAppStore((s) => s.locations);
@@ -215,6 +218,7 @@ export default function InspectionReviewPage() {
                   </div>
                   {answer?.observacao && <div className="text-xs text-slate-500 mt-1.5">{answer.observacao}</div>}
                   {answer?.evidenceCount ? <div className="text-xs text-slate-400 mt-1">{answer.evidenceCount} evidência(s) anexada(s)</div> : null}
+                  <AnswerHistoryToggle itemId={item.id} revisions={historyForItem(answerHistory, item.id)} />
                   {nc && (
                     <div className="mt-2.5 bg-red-50 border border-red-200 rounded-lg p-2.5">
                       <div className="text-xs font-semibold text-red-700 uppercase tracking-wide">Não conformidade · {nc.criticidade}</div>

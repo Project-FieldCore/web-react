@@ -597,6 +597,44 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     });
   });
 
+  describe('histórico de respostas (auditável)', () => {
+    const SUPERVISOR = { id: 'usr-super', nome: 'Marina Costa', email: 'marina@fieldcore.com', role: 'SUPERVISOR' as const, status: 'ATIVO' as const };
+    const history = (id = ASSIGNED_ID) => useAppStore.getState().answerHistory[id] ?? [];
+
+    beforeEach(() => {
+      useAppStore.setState({ currentUser: SUPERVISOR, answerHistory: {} });
+    });
+    afterEach(() => {
+      useAppStore.setState({ currentUser: null, answerHistory: {} });
+    });
+
+    it('registra a primeira resposta com autor, data e sem valor anterior', () => {
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'CONFORME' });
+      expect(history()).toHaveLength(1);
+      expect(history()[0]).toMatchObject({ itemId: 'e1', autorNome: 'Marina Costa', anterior: undefined, novo: { conformity: 'CONFORME' } });
+      expect(Number.isNaN(Date.parse(history()[0].em))).toBe(false);
+    });
+
+    it('registra a alteração guardando o valor anterior', () => {
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'CONFORME' });
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'NAO_CONFORME', observacao: 'vazamento' });
+      expect(history()).toHaveLength(2);
+      expect(history()[1].anterior).toEqual({ conformity: 'CONFORME' });
+      expect(history()[1].novo).toEqual({ conformity: 'NAO_CONFORME', observacao: 'vazamento' });
+    });
+
+    it('salvar o mesmo conteúdo não polui o histórico', () => {
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'CONFORME' });
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'CONFORME' });
+      expect(history()).toHaveLength(1);
+    });
+
+    it('mantém o histórico separado por inspeção', () => {
+      useAppStore.getState().saveAnswer(ASSIGNED_ID, 'e1', { conformity: 'CONFORME' });
+      expect(history(SENT_ID)).toEqual([]);
+    });
+  });
+
   describe('cancelamento com justificativa (RN-029/030)', () => {
     const SUPERVISOR = { id: 'usr-super', nome: 'Marina Costa', email: 'marina@fieldcore.com', role: 'SUPERVISOR' as const, status: 'ATIVO' as const };
     const setStatus = (id: string, status: Inspection['status']) =>

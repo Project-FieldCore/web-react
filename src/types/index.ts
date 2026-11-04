@@ -161,6 +161,27 @@ export interface Answer {
   photos?: string[];
 }
 
+/** Conteúdo de uma resposta em um instante do histórico. */
+export interface AnswerSnapshot {
+  conformity?: ConformityAnswer;
+  value?: string;
+  observacao?: string;
+}
+
+/** Uma alteração de resposta: quem mudou, quando, e o antes/depois (auditável). */
+export interface AnswerRevision {
+  id: string;
+  inspectionId: string;
+  itemId: string;
+  autorNome: string;
+  autorId?: string;
+  /** Data e hora da alteração (ISO). */
+  em: string;
+  /** Ausente na primeira resposta ao item. */
+  anterior?: AnswerSnapshot;
+  novo: AnswerSnapshot;
+}
+
 export function isAnswerFilled(answer: Answer | undefined): boolean {
   if (!answer) return false;
   return Boolean(answer.conformity || (answer.value && answer.value.trim().length > 0));
