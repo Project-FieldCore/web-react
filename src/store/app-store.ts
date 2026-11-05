@@ -1119,12 +1119,11 @@ export const useAppStore = create<AppState>()(
         return { ok: false, error: `Nenhuma alteração desde a versão v${model.version}. Altere o modelo antes de publicar.` };
       }
 
-      // A API recebe o rascunho completo e só então publica — quem decide a
-      // nova versão (RN-020) é ela; usamos o que voltar.
+      // Seções e itens já foram persistidos. Publicar só promove o rascunho
+      // (POST /inspection-templates/{id}/publish). Quem numera a versão é a API.
       let published: InspectionModel;
       try {
-        await modelsApi.saveModel(model);
-        published = await modelsApi.publishModel(modelId);
+        published = await modelsApi.publishModel(modelId, model.lockVersion ?? 0);
       } catch (error) {
         return toErrorResult(error, 'Não foi possível publicar o modelo. Tente novamente.');
       }

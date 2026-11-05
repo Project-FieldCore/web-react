@@ -361,8 +361,8 @@ describe('useAppStore construtor de modelos — #134', () => {
       const result = await useAppStore.getState().publishModel(PUBLISHED_ID);
 
       expect(result).toEqual({ ok: true });
-      expect(modelsApi.saveModel).toHaveBeenCalled();
-      expect(modelsApi.publishModel).toHaveBeenCalledWith(PUBLISHED_ID);
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+      expect(modelsApi.publishModel).toHaveBeenCalledWith(PUBLISHED_ID, current.lockVersion ?? 0);
       const published = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
       expect(published.version).toBe(current.version + 1);
       // a nova versão vira a foto publicada e a edição termina
@@ -384,17 +384,17 @@ describe('useAppStore construtor de modelos — #134', () => {
       expect(model.sections).toHaveLength(current.sections.length);
     });
 
-    it('não publica se o salvamento falhar', async () => {
+    it('não altera o modelo local se a publicação falhar', async () => {
       editPublishedModel();
-      mocked(modelsApi.saveModel).mockRejectedValue(new ApiError('Título duplicado.', 422));
+      mocked(modelsApi.publishModel).mockRejectedValue(new ApiError('Título duplicado.', 409, undefined, 'TEMPLATE_TITLE_ALREADY_EXISTS'));
 
       const result = await useAppStore.getState().publishModel(PUBLISHED_ID);
 
-      expect(result).toEqual({ ok: false, error: 'Título duplicado.' });
-      expect(modelsApi.publishModel).not.toHaveBeenCalled();
+      expect(result.ok).toBe(false);
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
       const model = useAppStore.getState().models.find((m) => m.id === PUBLISHED_ID)!;
       expect(model.version).toBe(3);
-      expect(model.editingNewVersion).toBe(true); // continua editando, nada se perdeu
+      expect(model.editingNewVersion).toBe(true);
     });
 
     it('versão publicada e imutável: publicar de novo é recusado sem chamar a API (RN-019)', async () => {
@@ -669,7 +669,8 @@ describe('useAppStore construtor de modelos — #134', () => {
       const result = await useAppStore.getState().publishModel(DRAFT_ID);
 
       expect(result).toEqual({ ok: true });
-      expect(modelsApi.publishModel).toHaveBeenCalledWith(DRAFT_ID);
+      expect(modelsApi.saveModel).not.toHaveBeenCalled();
+      expect(modelsApi.publishModel).toHaveBeenCalledWith(DRAFT_ID, current.lockVersion ?? 0);
     });
 
     it('as mensagens de RN-015/016 continuam as mesmas', async () => {
