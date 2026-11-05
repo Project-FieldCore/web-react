@@ -1,5 +1,6 @@
 import { http } from './http';
-import type { Inspection, InspectionStatus, NonConformityStatus, Priority } from '@/types';
+import { buildQueryString, listParams, type ListQuery, type Paged } from './paged-list';
+import type { Cancellation, Inspection, InspectionStatus, NonConformityStatus, Priority } from '@/types';
 
 /**
  * Agendamento — contrato REAL (openapi/fieldops-v1.yaml + InspectionController,
@@ -12,7 +13,9 @@ import type { Inspection, InspectionStatus, NonConformityStatus, Priority } from
  *   404 CLIENT_NOT_FOUND / SITE_NOT_FOUND / TECHNICIAN_NOT_FOUND, 409 TECHNICIAN_ROLE_INVALID /
  *   TECHNICIAN_NOT_ACTIVE, 400 (data não futura, tamanhos).
  *   PATCH /inspections/{id}/assignee { technicianId, version } troca o técnico.
- * Não existe equipamento no agendamento da API, nem listagem de inspeções para o supervisor.
+ *   PATCH /inspections/{id}/cancel { reason, version } cancela com justificativa (RN-029/030).
+ *   GET /inspections lista paginada para ADMIN/SUPERVISOR (status, período, técnico, cliente).
+ * Não existe equipamento no agendamento da API.
  *
  * As demais funções abaixo (revisão, não conformidades, respostas, envio) seguem num
  * contrato assumido (#135) — o OpenAPI não as declara — e precisam de confirmação do backend.
@@ -66,8 +69,23 @@ export interface ApiInspection {
   priority: ApiPriority;
   status: ApiInspectionStatus;
   scheduledFor: string;
+  canceledBy?: string | null;
+  canceledAt?: string | null;
+  canceledReason?: string | null;
   version: number;
 }
+
+const STATUS_TO_API: Record<InspectionStatus, ApiInspectionStatus> = {
+  RASCUNHO: 'DRAFT',
+  ATRIBUIDA: 'ASSIGNED',
+  EM_ANDAMENTO: 'IN_PROGRESS',
+  ENVIADA: 'SUBMITTED',
+  EM_REVISAO: 'UNDER_REVIEW',
+  APROVADA: 'APPROVED',
+  REPROVADA: 'REJECTED',
+  CANCELADA: 'CANCELED',
+  DEVOLVIDA: 'REJECTED',
+};
 
 /** Corpo do `POST /inspections`. O título fica de fora: a API usa o do modelo. */
 export function toScheduleBody(input: ScheduleInspectionInput, templateVersionId: string) {
@@ -105,7 +123,18 @@ export function toInspection(
     status: STATUS_FROM_API[api.status],
     answers: {},
     nonConformities: {},
+    cancelamento: toCancellation(api),
     version: api.version,
+  };
+}
+
+function toCancellation(api: ApiInspection): Cancellation | undefined {
+  if (!api.canceledAt && !api.canceledReason) return undefined;
+  return {
+    porId: api.canceledBy ?? undefined,
+    porNome: 'Supervisor',
+    em: api.canceledAt ?? new Date().toISOString(),
+    justificativa: api.canceledReason?.trim() ?? '',
   };
 }
 
@@ -129,6 +158,42 @@ export function toAssignmentUpdate(api: Pick<ApiInspection, 'technicianId' | 'st
 /** Troca o técnico (`PATCH /inspections/{id}/assignee`); só vale em inspeção atribuída ou em rascunho. */
 export async function assignInspection(id: string, technicianId: string, version: number): Promise<AssignmentUpdate> {
   return toAssignmentUpdate(await http.patch<ApiInspection>(`/inspections/${id}/assignee`, { technicianId, version }));
+}
+
+/** Cancela na API (`PATCH /inspections/{id}/cancel`). Aprovada e já cancelada voltam 409. */
+export async function cancelInspection(id: string, reason: string, version: number): Promise<Inspection> {
+  const api = await http.patch<ApiInspection>(`/inspections/${id}/cancel`, { reason: reason.trim(), version });
+  return toInspection(api, { modeloId: api.templateVersionId, modeloVersao: 0 });
+}
+
+export interface InspectionListFilters {
+  status?: ApiInspectionStatus;
+  technicianId?: string;
+  clientId?: string;
+  scheduledFrom?: string;
+  scheduledTo?: string;
+}
+
+/** Listagem administrativa paginada (`GET /inspections`). */
+export async function listInspections(query: ListQuery<InspectionListFilters>): Promise<Paged<Inspection>> {
+  const path = `/inspections${buildQueryString({
+    ...listParams(query),
+    status: query.filters.status,
+    technicianId: query.filters.technicianId,
+    clientId: query.filters.clientId,
+    scheduledFrom: query.filters.scheduledFrom,
+    scheduledTo: query.filters.scheduledTo,
+  })}`;
+  const page = await http.get<{ items: ApiInspection[]; page: Paged<Inspection>['page'] }>(path);
+  return {
+    items: page.items.map((item) => toInspection(item, { modeloId: item.templateVersionId, modeloVersao: 0 })),
+    page: page.page,
+  };
+}
+
+export function inspectionStatusToApi(status: InspectionStatus): ApiInspectionStatus | undefined {
+  if (status === 'DEVOLVIDA') return undefined;
+  return STATUS_TO_API[status];
 }
 
 export function startReview(id: string): Promise<Inspection> {

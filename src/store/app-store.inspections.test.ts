@@ -24,6 +24,8 @@ vi.mock('@/lib/inspections-api', () => ({
   setNonConformityStatus: vi.fn(),
   syncResponses: vi.fn(),
   submitInspection: vi.fn(),
+  cancelInspection: vi.fn(),
+  listInspections: vi.fn(),
 }));
 
 import * as inspectionsApi from '@/lib/inspections-api';
@@ -608,6 +610,31 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     });
     afterEach(() => {
       useAppStore.setState({ currentUser: null });
+    });
+
+    it('inspeção da API (com version) cancela no PATCH e guarda a trilha que voltou', async () => {
+      useAppStore.setState((s) => ({
+        inspections: s.inspections.map((i) => (i.id === ASSIGNED_ID ? { ...i, version: 4 } : i)),
+      }));
+      mocked(inspectionsApi.cancelInspection).mockResolvedValue({
+        ...find(ASSIGNED_ID),
+        status: 'CANCELADA',
+        version: 5,
+        cancelamento: {
+          porId: 'usr-super',
+          porNome: 'Supervisor',
+          em: '2026-11-05T12:00:00.000Z',
+          justificativa: 'Cliente pediu o cancelamento.',
+        },
+      });
+
+      const result = await useAppStore.getState().cancelInspection(ASSIGNED_ID, '  Cliente pediu o cancelamento.  ');
+
+      expect(result).toEqual({ ok: true });
+      expect(inspectionsApi.cancelInspection).toHaveBeenCalledWith(ASSIGNED_ID, '  Cliente pediu o cancelamento.  ', 4);
+      expect(find(ASSIGNED_ID).status).toBe('CANCELADA');
+      expect(find(ASSIGNED_ID).version).toBe(5);
+      expect(find(ASSIGNED_ID).cancelamento).toMatchObject({ porNome: 'Marina Costa', porId: 'usr-super' });
     });
 
     it('cancela, vira CANCELADA e registra usuário, data e justificativa (RN-029)', async () => {
