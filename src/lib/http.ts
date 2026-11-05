@@ -86,6 +86,9 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   TECHNICIAN_ROLE_INVALID: 'O usuário escolhido não é um técnico.',
   TECHNICIAN_NOT_ACTIVE: 'Somente técnicos ativos podem receber uma nova atribuição (RN-027).',
   INSPECTION_NOT_ASSIGNABLE: 'Esta inspeção já não pode ser reatribuída no estado atual.',
+  INSPECTION_CANNOT_BE_CANCELED: 'Inspeção aprovada não pode ser cancelada pelo fluxo comum (RN-030).',
+  INSPECTION_ALREADY_CANCELED: 'Esta inspeção já está cancelada.',
+  INVALID_DATE_RANGE: 'A data inicial do período precisa ser anterior à data final.',
   INVALID_SORT: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
   // 409 genérico (violação de integridade no banco, sem código específico).
   CONFLICT: 'Não foi possível salvar: os dados conflitam com um registro existente.',

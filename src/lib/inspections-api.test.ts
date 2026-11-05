@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assignInspection, scheduleInspection, toAssignmentUpdate, toInspection, toScheduleBody, type ApiInspection, type ScheduleInspectionInput } from './inspections-api';
+import { assignInspection, cancelInspection, listInspections, scheduleInspection, toAssignmentUpdate, toInspection, toScheduleBody, type ApiInspection, type ScheduleInspectionInput } from './inspections-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -231,5 +231,47 @@ describe('scheduleInspection (API)', () => {
         'Técnico não encontrado. Ele pode ter sido removido.',
       ]);
     });
+  });
+
+  it('cancela com PATCH /inspections/{id}/cancel e lê a trilha', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        ...API_INSPECTION,
+        status: 'CANCELED',
+        version: 2,
+        canceledBy: 'sup-1',
+        canceledAt: '2026-11-05T12:00:00Z',
+        canceledReason: 'Cliente pediu',
+      })
+    );
+    global.fetch = fetchMock;
+
+    const inspection = await cancelInspection('ins-1', '  Cliente pediu  ', 1);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/inspections\/ins-1\/cancel$/);
+    expect(JSON.parse(init.body)).toEqual({ reason: 'Cliente pediu', version: 1 });
+    expect(inspection.status).toBe('CANCELADA');
+    expect(inspection.cancelamento).toMatchObject({ porId: 'sup-1', justificativa: 'Cliente pediu' });
+  });
+
+  it('lista inspeções com filtros e paginação', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { items: [API_INSPECTION], page: { page: 0, size: 20, totalElements: 1, totalPages: 1 } })
+    );
+    global.fetch = fetchMock;
+
+    const page = await listInspections({
+      page: 0,
+      size: 20,
+      sort: { field: 'scheduledFor', dir: 'asc' },
+      q: '',
+      filters: { status: 'ASSIGNED', clientId: 'cli-1', technicianId: 'tec-1', scheduledFrom: '2026-11-01T00:00:00.000Z' },
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('status=ASSIGNED');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('clientId=cli-1');
+    expect(page.items[0]).toMatchObject({ id: 'ins-1', status: 'ATRIBUIDA', clienteId: 'cli-1' });
+    expect(page.page.totalElements).toBe(1);
   });
 });

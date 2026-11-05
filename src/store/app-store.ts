@@ -1224,7 +1224,29 @@ export const useAppStore = create<AppState>()(
       const user = get().currentUser;
       if (!user) return { ok: false, error: 'Sua sessão expirou. Entre novamente para cancelar a inspeção.' };
 
-      // Quando o backend tiver o endpoint de cancelar, a chamada entra aqui (antes de gravar na tela).
+      if (inspection.version !== undefined) {
+        try {
+          const updated = await inspectionsApi.cancelInspection(inspectionId, justificativa, inspection.version);
+          const fromApi = updated.cancelamento ?? buildCancellation({ id: user.id, nome: user.nome }, justificativa);
+          const cancelamento = {
+            ...fromApi,
+            porNome: fromApi.porId === user.id || !fromApi.porId ? user.nome : fromApi.porNome,
+          };
+          set((s) => ({
+            inspections: s.inspections.map((i) =>
+              i.id === inspectionId
+                ? { ...i, status: 'CANCELADA' as const, version: updated.version, cancelamento }
+                : i
+            ),
+            syncQueue: s.syncQueue.filter((q) => q.inspectionId !== inspectionId),
+          }));
+          pushAudit('CANCELOU', 'Inspeção', inspectionId, cancelamento.justificativa);
+          return { ok: true };
+        } catch (error) {
+          return toErrorResult(error, 'Não foi possível cancelar a inspeção. Tente novamente.');
+        }
+      }
+
       const cancelamento = buildCancellation({ id: user.id, nome: user.nome }, justificativa);
       set((s) => ({
         inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, status: 'CANCELADA', cancelamento } : i)),
