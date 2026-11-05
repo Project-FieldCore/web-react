@@ -154,7 +154,24 @@ describe('http', () => {
   it('resposta de erro sem corpo JSON usa o texto do status', async () => {
     global.fetch = vi.fn().mockResolvedValue(new Response('boom', { status: 500, statusText: 'Internal Server Error' }));
 
-    await expect(http.get('/clients')).rejects.toMatchObject({ status: 500, message: 'Internal Server Error' });
+    await expect(http.get('/clients')).rejects.toMatchObject({ status: 500, message: 'O servidor encontrou um problema. Tente novamente em instantes.' });
+  });
+
+  it('falha de rede com o navegador offline avisa que não há conexão', async () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(http.get('/clients')).rejects.toMatchObject({
+      name: 'NetworkError',
+      message: 'Sem conexão com a internet. Verifique sua rede e tente novamente.',
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('resposta 4xx sem corpo JSON usa o texto do status', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('x', { status: 418, statusText: "I'm a teapot" }));
+
+    await expect(http.get('/clients')).rejects.toMatchObject({ status: 418, message: "I'm a teapot" });
   });
 
   describe('renovação automática da sessão (401 com token)', () => {

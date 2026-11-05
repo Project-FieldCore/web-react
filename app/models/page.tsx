@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { ModelStatusBadge, StatCard } from '@/components/Badges';
 import { EmptyState, InlineError } from '@/components/States';
+import { emptyMessage } from '@/lib/ui-messages';
 import { Field, Modal } from '@/components/Modal';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import type { ModelStatus } from '@/types';
@@ -35,6 +36,8 @@ export default function ModelsPage() {
   const publishedCount = models.filter((m) => m.status === 'PUBLICADO').length;
   const draftCount = models.filter((m) => m.status === 'RASCUNHO').length;
   const totalItems = models.reduce((sum, m) => sum + m.sections.reduce((s2, sec) => s2 + sec.items.length, 0), 0);
+
+  const emptyProps = emptyMessage({ empty: 'Ainda não há modelos de inspeção', notFound: 'Nenhum modelo encontrado' }, statusFilter !== 'TODOS' || categoryFilter !== 'TODAS' || search.trim() !== '');
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -99,7 +102,7 @@ export default function ModelsPage() {
 
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl">
-          <EmptyState title="Nenhum modelo encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
+          <EmptyState {...emptyProps} />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

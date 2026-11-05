@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ApiError, NetworkError } from '@/lib/http';
+import { describeError } from '@/lib/ui-messages';
 import {
   initialPagedListState,
   pagedListReducer,
@@ -74,16 +74,20 @@ export function usePagedList<T, F extends object>(
       .catch((err: unknown) => {
         if (requestId !== latestRequest.current) return;
         setStatus('error');
-        setError(
-          err instanceof ApiError || err instanceof NetworkError
-            ? err.message
-            : 'Não foi possível carregar a lista. Tente novamente.'
-        );
+        setError(describeError(err, 'Não foi possível carregar a lista. Tente novamente.').message);
         setRefreshing(false);
       });
   }, [state.page, state.size, state.sort, state.q, state.filters, reloadToken]);
 
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
+
+  // Voltou a conexão com a lista em erro: tenta de novo sem o usuário precisar clicar.
+  useEffect(() => {
+    if (status !== 'error') return;
+    const retry = () => setReloadToken((n) => n + 1);
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [status]);
   const clear = useCallback(() => dispatch({ type: 'clear', filters: initialFilters }), [initialFilters]);
 
   const hasActiveFilters =

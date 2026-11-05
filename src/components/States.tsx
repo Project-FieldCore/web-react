@@ -1,3 +1,5 @@
+import { OFFLINE_BANNER_MESSAGE } from '@/lib/ui-messages';
+
 /**
  * Estados padronizados de carregamento, vazio e erro (#137). Todas as telas
  * usam estes componentes em vez de markup ad hoc, para manter o mesmo visual
@@ -63,6 +65,15 @@ export function InlineError({ message }: { message: string | null }) {
   return (
     <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-sm font-semibold rounded-xl px-4 py-3">
       {message}
+    </div>
+  );
+}
+
+/** Faixa fixa mostrada em todas as telas enquanto não há conexão. */
+export function OfflineBanner() {
+  return (
+    <div role="status" aria-live="polite" className="fixed top-0 inset-x-0 z-50 bg-amber-100 border-b border-amber-300 text-amber-900 text-sm font-semibold text-center px-4 py-2 print:hidden">
+      {OFFLINE_BANNER_MESSAGE}
     </div>
   );
 }

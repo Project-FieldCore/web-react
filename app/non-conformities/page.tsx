@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, InlineError } from '@/components/States';
+import { emptyMessage } from '@/lib/ui-messages';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { CriticidadeTag, NonConformityStatusBadge, StatCard } from '@/components/Badges';
 import type { Criticidade, NonConformity, NonConformityStatus } from '@/types';
@@ -47,6 +48,8 @@ export default function NonConformitiesPage() {
       }))
     );
   }, [inspections, clients, locations]);
+
+  const emptyProps = emptyMessage({ empty: 'Ainda não há não conformidades', notFound: 'Nenhuma não conformidade encontrada' }, criticidadeFilter !== 'TODAS' || statusFilter !== 'TODAS');
 
   const filtered = flatList
     .filter((nc) => criticidadeFilter === 'TODAS' || nc.criticidade === criticidadeFilter)
@@ -99,7 +102,7 @@ export default function NonConformitiesPage() {
 
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl">
-          <EmptyState title="Nenhuma não conformidade encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." />
+          <EmptyState {...emptyProps} />
         </div>
       ) : (
         <div className="space-y-3">

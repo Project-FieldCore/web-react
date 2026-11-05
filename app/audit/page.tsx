@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState } from '@/components/States';
+import { emptyMessage } from '@/lib/ui-messages';
 import { StatCard } from '@/components/Badges';
 
 /**
@@ -17,6 +18,8 @@ export default function AuditPage() {
   const [search, setSearch] = useState('');
 
   const entities = useMemo(() => Array.from(new Set(auditEvents.map((e) => e.entity))).sort(), [auditEvents]);
+
+  const emptyProps = emptyMessage({ empty: 'Ainda não há eventos de auditoria', notFound: 'Nenhum evento encontrado' }, entityFilter !== 'TODAS' || search.trim() !== '');
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -86,7 +89,7 @@ export default function AuditPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5}><EmptyState title="Nenhum evento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
+              <tr><td colSpan={5}><EmptyState {...emptyProps} /></td></tr>
             )}
           </tbody>
         </table>
@@ -104,7 +107,7 @@ export default function AuditPage() {
             </div>
           ))}
           {filtered.length === 0 && (
-            <EmptyState title="Nenhum evento encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
+            <EmptyState {...emptyProps} />
           )}
         </div>
       </div>

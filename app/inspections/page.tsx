@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState } from '@/components/States';
+import { emptyMessage } from '@/lib/ui-messages';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
 import { formatDateTime } from '@/lib/inspection-display';
 import type { InspectionStatus } from '@/types';
@@ -35,6 +36,8 @@ export default function InspectionsListPage() {
   const clientName = (id: string) => clients.find((c) => c.id === id)?.nome ?? '—';
   const techName = (id: string) => users.find((u) => u.id === id)?.nome ?? '—';
   const detailHref = (i: (typeof inspections)[number]) => `/inspections/${i.id}`;
+
+  const emptyProps = emptyMessage({ empty: 'Ainda não há inspeções', notFound: 'Nenhuma inspeção encontrada' }, filter !== 'TODAS' || techFilter !== 'TODOS');
 
   const filtered = useMemo(() => {
     return inspections.filter((i) => {
@@ -108,7 +111,7 @@ export default function InspectionsListPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={6}><EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." /></td></tr>
+              <tr><td colSpan={6}><EmptyState {...emptyProps} /></td></tr>
             )}
           </tbody>
         </table>
@@ -137,7 +140,7 @@ export default function InspectionsListPage() {
             </Link>
           ))}
           {filtered.length === 0 && (
-            <EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros ou a busca para ver outros resultados." />
+            <EmptyState {...emptyProps} />
           )}
         </div>
       </div>

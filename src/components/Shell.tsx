@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { Sidebar } from '@/components/Sidebar';
+import { OfflineBanner } from '@/components/States';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { PUBLIC_ROUTES, isAllowed } from '@/lib/route-access';
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -11,6 +13,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const currentUser = useAppStore((s) => s.currentUser);
   const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+  const online = useOnlineStatus();
 
   // A sessão é reidratada da sessionStorage de forma assíncrona (só existe no
   // navegador) — sem esperar isso, um refresh em rota protegida chutaria o
@@ -49,7 +52,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
     // Sessão já ativa acessando uma rota pública diretamente — tela em branco até o redirect acima disparar.
     if (currentUser) return <div className="min-h-screen" />;
     // A própria página controla seu layout (split-screen full-bleed, sem Sidebar).
-    return <div className="min-h-screen">{children}</div>;
+    return (
+      <div className="min-h-screen">
+        {!online && <OfflineBanner />}
+        {children}
+      </div>
+    );
   }
 
   // Sessão ainda não resolvida ou rota não permitida para o perfil — evita piscar conteúdo protegido.
@@ -59,6 +67,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      {!online && <OfflineBanner />}
       <div className="print:hidden">
         <Sidebar />
       </div>

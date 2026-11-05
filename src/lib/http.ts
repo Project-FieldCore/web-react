@@ -90,6 +90,7 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
 };
 
 const FORBIDDEN_MESSAGE = 'Você não tem permissão para realizar esta ação.';
+const SERVER_ERROR_MESSAGE = 'O servidor encontrou um problema. Tente novamente em instantes.';
 
 /**
  * Formato padrão de erro da API: { status, code, message, fieldErrors[] }.
@@ -99,6 +100,7 @@ const FORBIDDEN_MESSAGE = 'Você não tem permissão para realizar esta ação.'
 function friendlyMessage(status: number, code: string | undefined, apiMessage: string, fieldErrors: unknown): string {
   if (code && ERROR_MESSAGES_BY_CODE[code]) return ERROR_MESSAGES_BY_CODE[code];
   if (status === 403) return FORBIDDEN_MESSAGE;
+  if (status >= 500) return SERVER_ERROR_MESSAGE;
   if (Array.isArray(fieldErrors) && fieldErrors.length > 0) {
     const messages = fieldErrors
       .map((e) => (e && typeof e.message === 'string' ? e.message : null))
@@ -146,10 +148,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       signal: controller.signal,
     });
   } catch {
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
     throw new NetworkError(
       timedOut.current
         ? 'A API demorou demais para responder. Tente novamente.'
-        : undefined
+        : offline
+          ? 'Sem conexão com a internet. Verifique sua rede e tente novamente.'
+          : undefined
     );
   } finally {
     clearTimeout(timeout);
