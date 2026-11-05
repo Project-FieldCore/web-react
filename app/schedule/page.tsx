@@ -14,7 +14,9 @@ import {
   missingScheduleFields,
   validateScheduleDate,
 } from '@/lib/schedule-rules';
-import type { Priority } from '@/types';
+import { listEquipmentBySite } from '@/lib/equipment-api';
+import { activeEquipmentForLocation, isEquipmentCompatible } from '@/lib/chained-selection';
+import type { Equipment, Priority } from '@/types';
 
 
 /**
@@ -32,7 +34,6 @@ export default function SchedulePage() {
   const locations = useAppStore((s) => s.locations);
   const locationsStatus = useAppStore((s) => s.locationsStatus);
   const loadLocations = useAppStore((s) => s.loadLocations);
-  const equipment = useAppStore((s) => s.equipment);
   const users = useAppStore((s) => s.users);
   const scheduleInspection = useAppStore((s) => s.scheduleInspection);
 
@@ -44,6 +45,10 @@ export default function SchedulePage() {
   const [prioridade, setPrioridade] = useState<Priority>('MEDIA');
   const [dataPrevista, setDataPrevista] = useState('');
   const [orientacoes, setOrientacoes] = useState('');
+  const [locationEquipment, setLocationEquipment] = useState<Equipment[]>([]);
+  const [equipmentStatus, setEquipmentStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [equipmentError, setEquipmentError] = useState<string | null>(null);
+  const [equipmentRetry, setEquipmentRetry] = useState(0);
   const submit = useAsyncAction();
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -61,19 +66,23 @@ export default function SchedulePage() {
     [locations, clienteId]
   );
   const locationsLoading = locationsStatus === 'idle' || locationsStatus === 'loading';
-  const availableEquipment = useMemo(() => equipment.filter((e) => e.localId === localId), [equipment, localId]);
+  const availableEquipment = useMemo(
+    () => activeEquipmentForLocation(locationEquipment, localId),
+    [locationEquipment, localId]
+  );
 
   const selectedModel = models.find((m) => m.id === modeloId);
   const selectedClient = clients.find((c) => c.id === clienteId);
   const selectedLocation = locations.find((l) => l.id === localId);
-  const selectedEquipment = equipment.find((e) => e.id === equipamentoId);
+  const selectedEquipment = availableEquipment.find((e) => e.id === equipamentoId);
   const selectedTech = users.find((u) => u.id === tecnicoId);
   const localOnly = isLocalOnlySchedule(selectedModel);
 
   // RN-025: campos obrigatórios para habilitar o envio; a API também exige data futura.
   const missing = missingScheduleFields({ modeloId, clienteId, localId, tecnicoId, dataPrevista });
   const dateError = validateScheduleDate(dataPrevista);
-  const isComplete = missing.length === 0 && !dateError;
+  const equipmentIsCompatible = !equipamentoId || isEquipmentCompatible(locationEquipment, localId, equipamentoId);
+  const isComplete = missing.length === 0 && !dateError && equipmentIsCompatible;
 
   // `min` do campo de data: agora, no fuso local (formato do datetime-local). Calculado só depois de
   // montar, para o servidor e o navegador não divergirem na hidratação.
@@ -84,8 +93,41 @@ export default function SchedulePage() {
     setMinDateTime(now.toISOString().slice(0, 16));
   }, []);
 
+  // A resposta de um local anterior não pode sobrescrever a seleção atual.
+  useEffect(() => {
+    let current = true;
+    setEquipamentoId('');
+    setEquipmentError(null);
+
+    if (!localId) {
+      setLocationEquipment([]);
+      setEquipmentStatus('idle');
+      return () => { current = false; };
+    }
+
+    setEquipmentStatus('loading');
+    void listEquipmentBySite(localId)
+      .then((items) => {
+        if (!current) return;
+        setLocationEquipment(items);
+        setEquipmentStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setLocationEquipment([]);
+        setEquipmentStatus('error');
+        setEquipmentError(error instanceof Error ? error.message : 'Não foi possível carregar os equipamentos.');
+      });
+
+    return () => { current = false; };
+  }, [localId, equipmentRetry]);
+
   async function handleSubmit() {
     setSuccess(null);
+    if (equipamentoId && !isEquipmentCompatible(locationEquipment, localId, equipamentoId)) {
+      setEquipmentError('O equipamento selecionado não pertence a este local ou está inativo. Selecione outro equipamento.');
+      return;
+    }
     const result = await submit.run(() => scheduleInspection({
       modeloId,
       clienteId,
@@ -186,12 +228,36 @@ export default function SchedulePage() {
               <select
                 value={equipamentoId}
                 onChange={(e) => setEquipamentoId(e.target.value)}
-                disabled={!localId}
+                disabled={!localId || equipmentStatus === 'loading'}
                 className="input disabled:bg-slate-50 disabled:text-slate-400"
               >
-                <option value="">Nenhum equipamento específico</option>
+                <option value="">
+                  {!localId
+                    ? 'Selecione um local primeiro'
+                    : equipmentStatus === 'loading'
+                      ? 'Carregando equipamentos...'
+                      : 'Nenhum equipamento específico'}
+                </option>
                 {availableEquipment.map((eq) => <option key={eq.id} value={eq.id}>{eq.nome}</option>)}
               </select>
+              {localId && equipmentStatus === 'ready' && availableEquipment.length === 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Este local não tem equipamentos ativos. Você pode agendar uma inspeção apenas para o local.
+                </p>
+              )}
+              {localId && equipmentStatus === 'error' && (
+                <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                  {equipmentError ?? 'Não foi possível carregar os equipamentos.'}{' '}
+                  <button type="button" onClick={() => setEquipmentRetry((value) => value + 1)} className="underline">
+                    Tentar novamente
+                  </button>
+                </p>
+              )}
+              {equipamentoId && !equipmentIsCompatible && (
+                <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
+                  O equipamento selecionado não é compatível com o local escolhido.
+                </p>
+              )}
               {equipamentoId && !localOnly && (
                 <p className="text-xs text-slate-500 mt-1">
                   O equipamento fica registrado só na tela: a API de agendamento ainda não o recebe.
