@@ -14,6 +14,7 @@ import { ReassignTechnicianDialog } from '@/components/inspections/ReassignTechn
 import { canReassign } from '@/lib/technician-rules';
 import { CancelInspectionAction } from '@/components/inspections/CancelInspectionAction';
 import { CancellationInfo } from '@/components/inspections/CancellationInfo';
+import { InspectionMonitoring } from '@/components/inspections/InspectionMonitoring';
 
 /**
  * UC-16 — Revisar inspeção / UC-17 — Aprovar ou reprovar inspeção.
@@ -156,6 +157,8 @@ export default function InspectionReviewPage() {
       )}
 
       {inspection.cancelamento && <CancellationInfo cancelamento={inspection.cancelamento} />}
+
+      <InspectionMonitoring inspectionId={inspection.id} />
 
       {/* RN-029/030: cancelar exige justificativa; aprovada não cancela pelo fluxo comum. */}
       <CancelInspectionAction status={inspection.status} onCancel={() => setShowCancel(true)} />
