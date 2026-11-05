@@ -227,3 +227,30 @@ export function syncResponses(
 export function submitInspection(id: string): Promise<Inspection> {
   return http.post<Inspection>(`/inspections/${id}/submit`);
 }
+
+export interface MonitoringEvidence {
+  id: string;
+  inspectionItemId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface MonitoringNonConformity {
+  id: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  description: string;
+  status: 'OPEN' | 'RESOLVED' | 'WAIVED';
+  createdAt: string;
+}
+
+export interface InspectionMonitoring {
+  inspectionId: string;
+  evidences: MonitoringEvidence[];
+  nonConformities: MonitoringNonConformity[];
+}
+
+export function fetchInspectionMonitoring(id: string): Promise<InspectionMonitoring> {
+  return http.get<InspectionMonitoring>(`/inspections/${id}/monitoring`);
+}
