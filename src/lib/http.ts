@@ -69,6 +69,8 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   SERIAL_NUMBER_ALREADY_EXISTS: 'Já existe um equipamento com esse número de série neste local.',
   TEMPLATE_TITLE_ALREADY_EXISTS: 'Já existe um modelo com esse título. Escolha outro título.',
   TEMPLATE_NOT_EDITABLE: 'Só modelos em rascunho podem ser editados.',
+  TEMPLATE_NOT_PUBLISHABLE:
+    'Não é possível publicar: o modelo precisa de título, categoria, ao menos uma seção e um item com tipo de resposta.',
   INSPECTION_TEMPLATE_NOT_FOUND: 'Modelo não encontrado. Ele pode ter sido removido.',
   SECTION_ORDER_ALREADY_EXISTS: 'Já existe uma seção nessa posição. Recarregue a lista e tente de novo.',
   INVALID_SECTION_ORDER: 'Ordem de seções inválida: cada seção precisa de uma posição diferente.',

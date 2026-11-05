@@ -95,7 +95,12 @@ export function saveModel(model: InspectionModel): Promise<InspectionModel> {
   return http.put<InspectionModel>(`/models/${model.id}`, model);
 }
 
-/** Contrato assumido (não existe na API ainda). RN-020: publicar de novo gera nova versão — quem incrementa é a API. */
-export function publishModel(id: string): Promise<InspectionModel> {
-  return http.post<InspectionModel>(`/models/${id}/publish`);
+/**
+ * Publica a versão de rascunho (PBI-0023). `lockVersion` é a trava otimista do template.
+ * RN-020: a API é quem numera a versão publicada.
+ */
+export async function publishModel(id: string, lockVersion: number): Promise<InspectionModel> {
+  return toModel(
+    await http.post<ApiTemplate>(`/inspection-templates/${id}/publish`, { version: lockVersion })
+  );
 }
