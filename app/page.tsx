@@ -175,6 +175,9 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+            <Link href="/inspections/review-queue" className="bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap transition-colors">
+              Revisar pendências
+            </Link>
             <Link href="/models" className="bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap transition-colors">
               + Novo modelo
             </Link>
@@ -187,7 +190,7 @@ export default function DashboardPage() {
 
       {/* KPIs — valor + participação real no total de inspeções (sem métricas inventadas) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiTile label="Aguardando revisão" value={aguardandoRevisao} total={totalInspections} tone="blue" icon={<IconInbox />} />
+        <KpiTile href="/inspections/review-queue" label="Aguardando revisão" value={aguardandoRevisao} total={totalInspections} tone="blue" icon={<IconInbox />} />
         <KpiTile label="Em andamento" value={emAndamento} total={totalInspections} tone="amber" icon={<IconClock />} />
         <KpiTile label="Aprovadas" value={aprovadas} total={totalInspections} tone="emerald" icon={<IconCheck />} />
         <KpiTile label="Reprovadas" value={reprovadas} total={totalInspections} tone="red" icon={<IconX />} />
@@ -479,17 +482,19 @@ function KpiTile({
   total,
   tone,
   icon,
+  href,
 }: {
   label: string;
   value: number;
   total: number;
   tone: keyof typeof TONE_CLASSES;
   icon: React.ReactNode;
+  href?: string;
 }) {
   const t = TONE_CLASSES[tone];
   const pct = Math.round((value / total) * 100);
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-2 mb-3">
         <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${t.bg} ${t.text}`}>{icon}</span>
         <span className="text-3xl font-extrabold text-navy-900 leading-none">{value}</span>
@@ -498,8 +503,16 @@ function KpiTile({
       <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
         <div className={`h-full rounded-full ${t.bar} transition-all duration-500`} style={{ width: value > 0 ? `${Math.max(pct, 4)}%` : '0%' }} />
       </div>
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <Link href={href} className="bg-white border border-slate-200 rounded-2xl p-5 block hover:bg-slate-50 transition-colors">
+        {body}
+      </Link>
+    );
+  }
+  return <div className="bg-white border border-slate-200 rounded-2xl p-5">{body}</div>;
 }
 
 const IconInbox = () => (

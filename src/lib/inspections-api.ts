@@ -254,3 +254,71 @@ export interface InspectionMonitoring {
 export function fetchInspectionMonitoring(id: string): Promise<InspectionMonitoring> {
   return http.get<InspectionMonitoring>(`/inspections/${id}/monitoring`);
 }
+
+/** Item da fila de revisão (`GET /inspections/review-queue`) — nomes alinhados ao OpenAPI. */
+export interface ApiReviewQueueItem {
+  id: string;
+  clientId: string;
+  clientName: string;
+  siteId: string;
+  siteName: string;
+  technicianId: string;
+  technicianName: string;
+  title: string;
+  priority: ApiPriority;
+  submittedAt: string;
+  scheduledFor: string;
+}
+
+export interface ReviewQueueItem {
+  id: string;
+  clientId: string;
+  clientName: string;
+  siteId: string;
+  siteName: string;
+  technicianId: string;
+  technicianName: string;
+  title: string;
+  prioridade: Priority;
+  submittedAt: string;
+  scheduledFor: string;
+}
+
+export interface ReviewQueueListFilters {
+  submittedFrom?: string;
+  submittedTo?: string;
+  technicianId?: string;
+  clientId?: string;
+}
+
+export function toReviewQueueItem(api: ApiReviewQueueItem): ReviewQueueItem {
+  return {
+    id: api.id,
+    clientId: api.clientId,
+    clientName: api.clientName,
+    siteId: api.siteId,
+    siteName: api.siteName,
+    technicianId: api.technicianId,
+    technicianName: api.technicianName,
+    title: api.title,
+    prioridade: PRIORITY_FROM_API[api.priority],
+    submittedAt: api.submittedAt,
+    scheduledFor: api.scheduledFor,
+  };
+}
+
+/** Fila dedicada de inspeções SUBMITTED (`GET /inspections/review-queue`). */
+export async function listReviewQueue(query: ListQuery<ReviewQueueListFilters>): Promise<Paged<ReviewQueueItem>> {
+  const path = `/inspections/review-queue${buildQueryString({
+    ...listParams(query),
+    submittedFrom: query.filters.submittedFrom,
+    submittedTo: query.filters.submittedTo,
+    technicianId: query.filters.technicianId,
+    clientId: query.filters.clientId,
+  })}`;
+  const page = await http.get<{ items: ApiReviewQueueItem[]; page: Paged<ReviewQueueItem>['page'] }>(path);
+  return {
+    items: page.items.map(toReviewQueueItem),
+    page: page.page,
+  };
+}
