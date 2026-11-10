@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assignInspection,
   cancelInspection,
+  fetchEvidenceContent,
   fetchInspectionChecklist,
   listInspections,
   listReviewQueue,
@@ -407,5 +408,28 @@ describe('fetchInspectionChecklist', () => {
 
     await expect(fetchInspectionChecklist('ins-1')).rejects.toMatchObject({ status: 403 } satisfies Partial<ApiError>);
     await expect(fetchInspectionChecklist('ins-missing')).rejects.toMatchObject({ status: 404 } satisfies Partial<ApiError>);
+  });
+});
+
+describe('fetchEvidenceContent', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('baixa o blob autenticado da evidência', async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(bytes, { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+    );
+    global.fetch = fetchMock;
+
+    const blob = await fetchEvidenceContent('ins-1', 'ev-1');
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/inspections\/ins-1\/evidence\/ev-1\/content$/);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer token-test');
+    expect(blob.type).toBe('image/jpeg');
+    expect(blob.size).toBe(3);
   });
 });

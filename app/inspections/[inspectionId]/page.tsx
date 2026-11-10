@@ -16,6 +16,7 @@ import { CancelInspectionAction } from '@/components/inspections/CancelInspectio
 import { CancellationInfo } from '@/components/inspections/CancellationInfo';
 import { InspectionMonitoring } from '@/components/inspections/InspectionMonitoring';
 import { InspectionReviewChecklist } from '@/components/inspections/InspectionReviewChecklist';
+import { EvidenceViewerProvider } from '@/components/inspections/EvidenceViewerContext';
 
 /**
  * UC-16 — Revisar inspeção / UC-17 — Aprovar ou reprovar inspeção.
@@ -113,6 +114,7 @@ export default function InspectionReviewPage() {
   }
 
   return (
+    <EvidenceViewerProvider inspectionId={inspection.id}>
     <div className="max-w-3xl mx-auto">
       <button onClick={() => router.push('/inspections')} className="text-sm font-semibold text-slate-500 mb-4">← Voltar às inspeções</button>
 
@@ -159,7 +161,7 @@ export default function InspectionReviewPage() {
 
       {inspection.cancelamento && <CancellationInfo cancelamento={inspection.cancelamento} />}
 
-      <InspectionMonitoring inspectionId={inspection.id} />
+      <InspectionMonitoring />
 
       {/* RN-029/030: cancelar exige justificativa; aprovada não cancela pelo fluxo comum. */}
       <CancelInspectionAction status={inspection.status} onCancel={() => setShowCancel(true)} />
@@ -276,5 +278,6 @@ export default function InspectionReviewPage() {
         />
       )}
     </div>
+    </EvidenceViewerProvider>
   );
 }

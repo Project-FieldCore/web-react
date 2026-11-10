@@ -7,8 +7,12 @@ import {
   fetchInspectionChecklist,
   type InspectionChecklistItem,
   type InspectionChecklistSection,
+  type MonitoringEvidence,
 } from '@/lib/inspections-api';
 import { formatChecklistAnswer } from '@/lib/inspection-checklist-display';
+import { evidencesForItem } from '@/lib/evidence-gallery';
+import { EvidenceThumbnail } from './EvidenceThumbnail';
+import { useEvidenceViewer } from './EvidenceViewerContext';
 
 type ChecklistStatus = 'loading' | 'ready' | 'error';
 
@@ -48,7 +52,17 @@ function checklistErrorCopy(error: unknown): { title: string; message: string; r
   };
 }
 
-function ChecklistItemCard({ item }: { item: InspectionChecklistItem }) {
+function ChecklistItemCard({
+  item,
+  inspectionId,
+  itemEvidences,
+  onOpenEvidence,
+}: {
+  item: InspectionChecklistItem;
+  inspectionId: string;
+  itemEvidences: MonitoringEvidence[];
+  onOpenEvidence?: (evidenceId: string) => void;
+}) {
   const answer = formatChecklistAnswer(item);
   const observation = item.observation?.trim() ? item.observation.trim() : null;
 
@@ -87,6 +101,24 @@ function ChecklistItemCard({ item }: { item: InspectionChecklistItem }) {
         </div>
       ) : null}
 
+      {itemEvidences.length > 0 && onOpenEvidence ? (
+        <div className="mt-2.5">
+          <div className="text-xs font-semibold text-slate-500 mb-1.5">{itemEvidences.length} foto(s)</div>
+          <div className="flex flex-row gap-2 overflow-x-auto">
+            {itemEvidences.map((evidence) => (
+              <div key={evidence.id} className="shrink-0">
+                <EvidenceThumbnail
+                  inspectionId={inspectionId}
+                  evidence={evidence}
+                  size="mini"
+                  onOpen={() => onOpenEvidence(evidence.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {process.env.NODE_ENV === 'development' && (item.rulesJson || item.optionsJson) ? (
         <div className="mt-2 text-[10px] font-mono text-slate-400 break-all">
           {item.rulesJson ? `rulesJson: ${item.rulesJson}` : null}
@@ -102,6 +134,7 @@ function ChecklistItemCard({ item }: { item: InspectionChecklistItem }) {
  * Falhas aqui não bloqueiam aprovar/reprovar na página.
  */
 export function InspectionReviewChecklist({ inspectionId }: { inspectionId: string }) {
+  const viewer = useEvidenceViewer();
   const [sections, setSections] = useState<InspectionChecklistSection[]>([]);
   const [status, setStatus] = useState<ChecklistStatus>('loading');
   const [errorTitle, setErrorTitle] = useState('Não foi possível carregar as respostas');
@@ -110,6 +143,8 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
   const [reloadToken, setReloadToken] = useState(0);
 
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
+  const sortedEvidences = viewer?.status === 'ready' ? viewer.sortedEvidences : [];
+  const openEvidence = viewer?.openEvidence;
 
   useEffect(() => {
     let active = true;
@@ -159,7 +194,15 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
             {section.items.length === 0 ? (
               <p className="text-sm text-slate-400 mb-2">Nenhum item nesta seção.</p>
             ) : (
-              section.items.map((item) => <ChecklistItemCard key={item.id} item={item} />)
+              section.items.map((item) => (
+                <ChecklistItemCard
+                  key={item.id}
+                  item={item}
+                  inspectionId={inspectionId}
+                  itemEvidences={evidencesForItem(sortedEvidences, item.id)}
+                  onOpenEvidence={openEvidence}
+                />
+              ))
             )}
           </div>
         ))}

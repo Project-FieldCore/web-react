@@ -231,10 +231,18 @@ export function submitInspection(id: string): Promise<Inspection> {
 export interface MonitoringEvidence {
   id: string;
   inspectionItemId: string;
+  /** Título do item do checklist (caption primário da galeria). */
+  itemTitle: string;
+  sectionTitle: string;
+  sectionOrder: number;
+  itemOrder: number;
   fileName: string;
   contentType: string;
   sizeBytes: number;
   createdAt: string;
+  inspectionResponseId?: string;
+  storageKey?: string;
+  createdBy?: string | null;
 }
 
 export interface MonitoringNonConformity {
@@ -253,6 +261,11 @@ export interface InspectionMonitoring {
 
 export function fetchInspectionMonitoring(id: string): Promise<InspectionMonitoring> {
   return http.get<InspectionMonitoring>(`/inspections/${id}/monitoring`);
+}
+
+/** Bytes autenticados da evidência (`GET /inspections/{id}/evidence/{evidenceId}/content`). */
+export function fetchEvidenceContent(inspectionId: string, evidenceId: string): Promise<Blob> {
+  return http.getBlob(`/inspections/${inspectionId}/evidence/${evidenceId}/content`);
 }
 
 /** Conformidade da API de checklist (≠ store `CONFORME`). */
