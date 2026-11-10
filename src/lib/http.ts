@@ -187,9 +187,58 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/** GET binário (imagens de evidência) — não faz JSON.parse; devolve Blob. */
+export async function requestBlob(path: string, options: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<Blob> {
+  const { headers, timeoutMs = DEFAULT_TIMEOUT_MS, anonymous = false, skipRefresh = false } = options;
+
+  const controller = new AbortController();
+  const timedOut = { current: false };
+  const timeout = setTimeout(() => {
+    timedOut.current = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const token = anonymous ? null : getAuthToken();
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'GET',
+      headers: {
+        Accept: '*/*',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+      signal: controller.signal,
+    });
+  } catch {
+    throw new NetworkError(
+      timedOut.current ? 'A API demorou demais para responder. Tente novamente.' : undefined
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    if (response.status === 401 && token) {
+      if (!skipRefresh) {
+        const current = getAuthToken();
+        const renewed = current !== null && current !== token ? true : await refreshSession();
+        if (renewed) return requestBlob(path, { ...options, skipRefresh: true });
+      }
+      notifyUnauthorized();
+    }
+    const { message, code, details } = await parseErrorBody(response);
+    throw new ApiError(message, response.status, details, code);
+  }
+
+  return response.blob();
+}
+
 export const http = {
   get: <T>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...options, method: 'GET' }),
+  getBlob: (path: string, options?: Omit<RequestOptions, 'method' | 'body'>) => requestBlob(path, options),
   post: <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...options, method: 'POST', body }),
   put: <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
