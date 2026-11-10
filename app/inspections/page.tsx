@@ -118,6 +118,14 @@ export default function InspectionsListPage() {
       <h1 className="text-2xl font-extrabold text-navy-900 mb-1">Inspeções</h1>
       <p className="text-sm text-slate-500 mb-6">Acompanhe o andamento e abra a revisão das inspeções enviadas (UC-15, UC-16)</p>
 
+      {list.filters.status === 'ENVIADA' && (
+        <p className="text-sm text-slate-600 mb-4">
+          <Link href="/inspections/review-queue" className="font-bold text-navy-700 underline">
+            Abrir fila de revisão
+          </Link>
+        </p>
+      )}
+
       <div className="flex flex-col gap-3 mb-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <FilterSelect

@@ -1,6 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assignInspection, cancelInspection, listInspections, scheduleInspection, toAssignmentUpdate, toInspection, toScheduleBody, type ApiInspection, type ScheduleInspectionInput } from './inspections-api';
+import {
+  assignInspection,
+  cancelInspection,
+  listInspections,
+  listReviewQueue,
+  scheduleInspection,
+  toAssignmentUpdate,
+  toInspection,
+  toReviewQueueItem,
+  toScheduleBody,
+  type ApiInspection,
+  type ApiReviewQueueItem,
+  type ScheduleInspectionInput,
+} from './inspections-api';
 import { setAuthToken } from './auth-token';
+import { ApiError } from './http';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -273,5 +287,80 @@ describe('scheduleInspection (API)', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('clientId=cli-1');
     expect(page.items[0]).toMatchObject({ id: 'ins-1', status: 'ATRIBUIDA', clienteId: 'cli-1' });
     expect(page.page.totalElements).toBe(1);
+  });
+});
+
+const API_REVIEW_QUEUE_ITEM: ApiReviewQueueItem = {
+  id: 'ins-rev-1',
+  clientId: 'cli-1',
+  clientName: 'Cliente Alpha',
+  siteId: 'site-1',
+  siteName: 'Planta Norte',
+  technicianId: 'tec-1',
+  technicianName: 'Ana Técnica',
+  title: 'Checklist elétrico',
+  priority: 'HIGH',
+  submittedAt: '2026-11-09T12:00:00Z',
+  scheduledFor: '2026-11-10T08:00:00Z',
+};
+
+describe('toReviewQueueItem', () => {
+  it('mantém nomes da API e mapeia prioridade para a UI', () => {
+    expect(toReviewQueueItem(API_REVIEW_QUEUE_ITEM)).toMatchObject({
+      id: 'ins-rev-1',
+      clientName: 'Cliente Alpha',
+      siteName: 'Planta Norte',
+      technicianName: 'Ana Técnica',
+      title: 'Checklist elétrico',
+      prioridade: 'ALTA',
+      submittedAt: '2026-11-09T12:00:00Z',
+    });
+  });
+});
+
+describe('listReviewQueue', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('chama GET /inspections/review-queue com filtros e ordenação', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        items: [API_REVIEW_QUEUE_ITEM],
+        page: { page: 0, size: 20, totalElements: 1, totalPages: 1 },
+      })
+    );
+    global.fetch = fetchMock;
+
+    const page = await listReviewQueue({
+      page: 0,
+      size: 20,
+      sort: { field: 'submittedAt', dir: 'asc' },
+      q: '',
+      filters: {
+        technicianId: 'tec-1',
+        clientId: 'cli-1',
+        submittedFrom: '2026-11-01T00:00:00.000Z',
+        submittedTo: '2026-11-30T23:59:59.000Z',
+      },
+    });
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/inspections/review-queue?');
+    expect(url).toContain('sort=submittedAt%2Casc');
+    expect(url).toContain('technicianId=tec-1');
+    expect(url).toContain('clientId=cli-1');
+    expect(url).toContain('submittedFrom=');
+    expect(page.items[0]).toMatchObject({ id: 'ins-rev-1', clientName: 'Cliente Alpha', prioridade: 'ALTA' });
+    expect(page.page.totalElements).toBe(1);
+  });
+
+  it('propaga 403 da fila', async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(403, { status: 403, code: 'ACCESS_DENIED', message: 'Forbidden' }));
+    await expect(
+      listReviewQueue({ page: 0, size: 20, sort: { field: 'submittedAt', dir: 'asc' }, q: '', filters: {} })
+    ).rejects.toMatchObject({ status: 403 } satisfies Partial<ApiError>);
   });
 });
