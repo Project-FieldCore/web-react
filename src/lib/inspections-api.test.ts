@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assignInspection,
   cancelInspection,
+  fetchInspectionChecklist,
   listInspections,
   listReviewQueue,
   scheduleInspection,
@@ -362,5 +363,49 @@ describe('listReviewQueue', () => {
     await expect(
       listReviewQueue({ page: 0, size: 20, sort: { field: 'submittedAt', dir: 'asc' }, q: '', filters: {} })
     ).rejects.toMatchObject({ status: 403 } satisfies Partial<ApiError>);
+  });
+});
+
+describe('fetchInspectionChecklist', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('chama GET /inspections/{id}/checklist e devolve as seções', async () => {
+    const sections = [
+      {
+        title: 'Estrutura',
+        order: 1,
+        items: [
+          {
+            id: 'item-1',
+            title: 'Sem trincas',
+            responseType: 'CONFORMITY',
+            required: true,
+            conformity: 'CONFORMING',
+            observation: 'Ok',
+          },
+        ],
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, sections));
+    global.fetch = fetchMock;
+
+    const result = await fetchInspectionChecklist('ins-1');
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/inspections\/ins-1\/checklist$/);
+    expect(result).toEqual(sections);
+  });
+
+  it('propaga 403 e 404', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(403, { status: 403, code: 'ACCESS_DENIED', message: 'Forbidden' }))
+      .mockResolvedValueOnce(jsonResponse(404, { status: 404, code: 'INSPECTION_NOT_FOUND', message: 'Missing' }));
+
+    await expect(fetchInspectionChecklist('ins-1')).rejects.toMatchObject({ status: 403 } satisfies Partial<ApiError>);
+    await expect(fetchInspectionChecklist('ins-missing')).rejects.toMatchObject({ status: 404 } satisfies Partial<ApiError>);
   });
 });

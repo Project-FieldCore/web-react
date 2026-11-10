@@ -255,6 +255,46 @@ export function fetchInspectionMonitoring(id: string): Promise<InspectionMonitor
   return http.get<InspectionMonitoring>(`/inspections/${id}/monitoring`);
 }
 
+/** Conformidade da API de checklist (≠ store `CONFORME`). */
+export type ApiChecklistConformity = 'CONFORMING' | 'NON_CONFORMING' | 'NOT_APPLICABLE';
+
+export type ApiChecklistResponseType =
+  | 'CONFORMITY'
+  | 'BOOLEAN'
+  | 'NUMBER'
+  | 'DATE'
+  | 'TEXT_SHORT'
+  | 'TEXT_LONG'
+  | 'SINGLE_CHOICE'
+  | string;
+
+export interface InspectionChecklistItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  responseType: ApiChecklistResponseType;
+  required: boolean;
+  rulesJson?: string | null;
+  optionsJson?: string | null;
+  observation?: string | null;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBoolean?: boolean | null;
+  valueDate?: string | null;
+  conformity?: ApiChecklistConformity | string | null;
+}
+
+export interface InspectionChecklistSection {
+  title: string;
+  order: number;
+  items: InspectionChecklistItem[];
+}
+
+/** Checklist read-only do supervisor (`GET /inspections/{id}/checklist`). */
+export function fetchInspectionChecklist(inspectionId: string): Promise<InspectionChecklistSection[]> {
+  return http.get<InspectionChecklistSection[]>(`/inspections/${inspectionId}/checklist`);
+}
+
 /** Item da fila de revisão (`GET /inspections/review-queue`) — nomes alinhados ao OpenAPI. */
 export interface ApiReviewQueueItem {
   id: string;
