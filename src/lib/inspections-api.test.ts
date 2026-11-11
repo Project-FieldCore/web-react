@@ -7,6 +7,7 @@ import {
   listInspections,
   listReviewQueue,
   scheduleInspection,
+  startReview,
   toAssignmentUpdate,
   toInspection,
   toReviewQueueItem,
@@ -431,5 +432,37 @@ describe('fetchEvidenceContent', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer token-test');
     expect(blob.type).toBe('image/jpeg');
     expect(blob.size).toBe(3);
+  });
+});
+
+describe('startReview', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('POST /review/start e mapeia UNDER_REVIEW → EM_REVISAO', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { ...API_INSPECTION, status: 'UNDER_REVIEW', version: 2 })
+    );
+    global.fetch = fetchMock;
+
+    const update = await startReview('ins-1');
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/inspections\/ins-1\/review\/start$/);
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(update).toEqual({ id: 'ins-1', status: 'EM_REVISAO', version: 2 });
+  });
+
+  it('propaga 409 INSPECTION_NOT_REVIEWABLE', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(409, { status: 409, code: 'INSPECTION_NOT_REVIEWABLE', message: 'not reviewable' })
+    );
+    await expect(startReview('ins-1')).rejects.toMatchObject({
+      status: 409,
+      code: 'INSPECTION_NOT_REVIEWABLE',
+      message: 'Esta inspeção não está aguardando revisão.',
+    });
   });
 });

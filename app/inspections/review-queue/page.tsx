@@ -125,6 +125,16 @@ export default function ReviewQueuePage() {
     void loadUsers();
   }, [loadClients, loadUsers]);
 
+  // Ao voltar do detalhe (após Iniciar revisão), refetch tira o item SUBMITTED da fila.
+  const reloadQueue = list.reload;
+  useEffect(() => {
+    function onFocus() {
+      reloadQueue();
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [reloadQueue]);
+
   const periodInvalid = isSubmittedPeriodInvalid(list.filters.submittedFrom, list.filters.submittedTo);
   const isForbidden = list.error === 'Seu perfil não pode consultar a fila de revisão.';
   const isUnauthorized = list.error === 'Sessão expirada. Entre novamente.';
@@ -218,7 +228,10 @@ export default function ReviewQueuePage() {
               {list.items.map((item) => (
                 <tr key={item.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                   <td className="px-5 py-3 font-semibold text-navy-900 truncate">
-                    <Link href={`/inspections/${item.id}`} aria-label={`Abrir inspeção ${item.title} para revisão`}>
+                    <Link
+                      href={`/inspections/${item.id}?from=review-queue`}
+                      aria-label={`Abrir inspeção ${item.title} para revisão`}
+                    >
                       {item.title}
                     </Link>
                     {process.env.NODE_ENV === 'development' ? (
@@ -260,7 +273,7 @@ export default function ReviewQueuePage() {
             {list.items.map((item) => (
               <Link
                 key={item.id}
-                href={`/inspections/${item.id}`}
+                href={`/inspections/${item.id}?from=review-queue`}
                 aria-label={`Abrir inspeção ${item.title} para revisão`}
                 className="block p-4 hover:bg-slate-50"
               >

@@ -88,6 +88,7 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   INSPECTION_NOT_ASSIGNABLE: 'Esta inspeção já não pode ser reatribuída no estado atual.',
   INSPECTION_CANNOT_BE_CANCELED: 'Inspeção aprovada não pode ser cancelada pelo fluxo comum (RN-030).',
   INSPECTION_ALREADY_CANCELED: 'Esta inspeção já está cancelada.',
+  INSPECTION_NOT_REVIEWABLE: 'Esta inspeção não está aguardando revisão.',
   INVALID_DATE_RANGE: 'A data inicial do período precisa ser anterior à data final.',
   INVALID_SORT: 'Ordenação inválida para esta lista. Escolha outra opção de ordenação.',
   // 409 genérico (violação de integridade no banco, sem código específico).
