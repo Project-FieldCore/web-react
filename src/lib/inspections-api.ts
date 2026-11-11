@@ -229,8 +229,23 @@ export async function approveInspection(
   };
 }
 
-export function rejectInspection(id: string, motivo: string): Promise<Inspection> {
-  return http.post<Inspection>(`/inspections/${id}/review/reject`, { motivo });
+/** Campos atualizados por `POST .../review/reject` (UNDER_REVIEW→REJECTED; idempotente). */
+export type ReviewRejectUpdate = Pick<Inspection, 'status' | 'version'>;
+
+export const REJECT_MOTIVO_MAX = 2000;
+
+/** Reprova inspeção em revisão. `motivo` obrigatório (1–2000 após trim). */
+export async function rejectInspection(
+  id: string,
+  motivo: string
+): Promise<ReviewRejectUpdate & { id: string }> {
+  const trimmed = motivo.trim();
+  const api = await http.post<ApiInspection>(`/inspections/${id}/review/reject`, { motivo: trimmed });
+  return {
+    id: api.id,
+    status: STATUS_FROM_API[api.status],
+    version: api.version,
+  };
 }
 
 export function returnForCorrection(id: string, comentario: string): Promise<Inspection> {

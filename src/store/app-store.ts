@@ -1347,15 +1347,48 @@ export const useAppStore = create<AppState>()(
       });
     },
 
-    // RN-080: reprovação deve possuir motivo obrigatório.
+    // PBI-0061 / RN-080: POST .../review/reject → REJECTED (REPROVADA); motivo obrigatório.
     rejectInspection: async (inspectionId, motivo) => {
-      if (!motivo.trim()) return { ok: false, error: 'Informe o motivo da reprovação (RN-080).' };
+      const trimmed = motivo.trim();
+      if (!trimmed) return { ok: false, error: 'Informe o motivo da reprovação.' };
+      if (trimmed.length > inspectionsApi.REJECT_MOTIVO_MAX) {
+        return { ok: false, error: 'O motivo deve ter no máximo 2000 caracteres.' };
+      }
       try {
-        replaceInspection(await inspectionsApi.rejectInspection(inspectionId, motivo.trim()));
+        const update = await inspectionsApi.rejectInspection(inspectionId, trimmed);
+        const supervisorNome = get().currentUser?.nome ?? 'Supervisor';
+        set((s) => ({
+          inspections: s.inspections.map((i) =>
+            i.id === inspectionId
+              ? {
+                  ...i,
+                  status: update.status,
+                  version: update.version,
+                  review: {
+                    supervisorNome,
+                    motivoReprovacao: trimmed,
+                    decidedAt: new Date().toISOString(),
+                  },
+                }
+              : i
+          ),
+        }));
       } catch (error) {
+        if (error instanceof ApiError) {
+          if (error.status === 403) return { ok: false, error: 'Seu perfil não pode reprovar esta inspeção.', code: error.code };
+          if (error.status === 404) return { ok: false, error: 'Inspeção não encontrada.', code: error.code };
+          if (error.status === 401) return { ok: false, error: 'Sessão expirada. Entre novamente.', code: error.code };
+          if (error.status === 400) return { ok: false, error: 'Informe um motivo válido para reprovar.', code: error.code };
+          if (error.code === 'INSPECTION_NOT_REVIEWABLE' || error.status === 409) {
+            return { ok: false, error: 'Esta inspeção não está em revisão.', code: error.code };
+          }
+        }
+        if (error instanceof NetworkError) {
+          return { ok: false, error: 'Não foi possível reprovar a inspeção. Tente novamente.' };
+        }
         return toErrorResult(error, 'Não foi possível reprovar a inspeção. Tente novamente.');
       }
-      pushAudit('REPROVOU', 'Inspeção', inspectionId, motivo);
+      pushAudit('REPROVOU', 'Inspeção', inspectionId, trimmed);
       return { ok: true };
     },
 

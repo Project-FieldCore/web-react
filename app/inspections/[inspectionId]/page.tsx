@@ -111,9 +111,29 @@ export default function InspectionReviewPage() {
   }
   async function handleReject() {
     setRejectError(null);
-    const result = await review.run(() => rejectInspection(inspection!.id, motivo));
-    if (!result.ok) { setRejectError(result.error); return; }
-    router.push('/inspections');
+    const trimmed = motivo.trim();
+    if (!trimmed) {
+      setRejectError('Informe o motivo da reprovação.');
+      return;
+    }
+    if (trimmed.length > 2000) {
+      setRejectError('O motivo deve ter no máximo 2000 caracteres.');
+      return;
+    }
+    const result = await review.run(() => rejectInspection(inspection!.id, trimmed));
+    if (!result.ok) {
+      setRejectError(result.error);
+      return;
+    }
+    setShowRejectForm(false);
+    setMotivo('');
+    setRejectError(null);
+  }
+
+  function handleCancelRejectForm() {
+    setShowRejectForm(false);
+    setMotivo('');
+    setRejectError(null);
   }
   async function handleReturnForCorrection() {
     setReturnError(null);
@@ -259,14 +279,39 @@ export default function InspectionReviewPage() {
         </>
       )}
 
-      {showRejectForm && (
+      {canReview && showRejectForm && (
         <div className="bg-white border border-red-200 rounded-2xl p-5 mt-3">
           <label className="text-xs font-bold text-red-700 uppercase block mb-1">Motivo da reprovação (obrigatório — RN-080)</label>
-          <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} rows={3} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-3" />
-          {rejectError && <div className="text-xs text-red-600 font-semibold mb-3">{rejectError}</div>}
+          <textarea
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value.slice(0, 2000))}
+            rows={3}
+            maxLength={2000}
+            disabled={review.pending}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-3 disabled:opacity-60"
+          />
+          {rejectError ? (
+            <div className="mb-3">
+              <InlineError message={rejectError} />
+            </div>
+          ) : null}
           <div className="flex flex-col sm:flex-row gap-2">
-            <button onClick={() => setShowRejectForm(false)} className="flex-1 bg-white border border-slate-300 rounded-xl py-2.5 font-bold text-navy-800">Cancelar</button>
-            <button onClick={handleReject} disabled={review.pending} className="flex-1 bg-red-600 text-white rounded-xl py-2.5 font-bold disabled:opacity-60">{review.pending ? 'Salvando...' : 'Confirmar reprovação'}</button>
+            <button
+              type="button"
+              onClick={handleCancelRejectForm}
+              disabled={review.pending}
+              className="flex-1 bg-white border border-slate-300 rounded-xl py-2.5 font-bold text-navy-800 disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleReject()}
+              disabled={review.pending || !motivo.trim()}
+              className="flex-1 bg-red-600 text-white rounded-xl py-2.5 font-bold disabled:opacity-60"
+            >
+              {review.pending ? 'Salvando...' : 'Confirmar reprovação'}
+            </button>
           </div>
         </div>
       )}

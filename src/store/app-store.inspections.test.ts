@@ -26,6 +26,7 @@ vi.mock('@/lib/inspections-api', () => ({
   submitInspection: vi.fn(),
   cancelInspection: vi.fn(),
   listInspections: vi.fn(),
+  REJECT_MOTIVO_MAX: 2000,
 }));
 
 import * as inspectionsApi from '@/lib/inspections-api';
@@ -340,16 +341,17 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
     it('RN-080: reprovação sem motivo não chama a API', async () => {
       const result = await useAppStore.getState().rejectInspection(SENT_ID, '   ');
 
-      expect(result.ok).toBe(false);
+      expect(result).toEqual({ ok: false, error: 'Informe o motivo da reprovação.' });
       expect(inspectionsApi.rejectInspection).not.toHaveBeenCalled();
       expect(find(SENT_ID).status).toBe('ENVIADA');
     });
 
-    it('rejectInspection com motivo chama a API e atualiza o status', async () => {
+    it('rejectInspection com motivo aplica REPROVADA', async () => {
+      useAppStore.setState({ currentUser: MOCK_USERS.find((u) => u.role === 'SUPERVISOR') ?? MOCK_USERS[0] });
       mocked(inspectionsApi.rejectInspection).mockResolvedValue({
-        ...find(SENT_ID),
+        id: SENT_ID,
         status: 'REPROVADA',
-        review: { supervisorNome: 'Marina Costa', motivoReprovacao: 'Evidência ausente' },
+        version: 6,
       });
 
       const result = await useAppStore.getState().rejectInspection(SENT_ID, ' Evidência ausente ');
@@ -357,6 +359,25 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(result).toEqual({ ok: true });
       expect(inspectionsApi.rejectInspection).toHaveBeenCalledWith(SENT_ID, 'Evidência ausente');
       expect(find(SENT_ID).status).toBe('REPROVADA');
+      expect(find(SENT_ID).version).toBe(6);
+      expect(find(SENT_ID).review?.motivoReprovacao).toBe('Evidência ausente');
+    });
+
+    it('rejectInspection traduz 403 e 409', async () => {
+      mocked(inspectionsApi.rejectInspection)
+        .mockRejectedValueOnce(new ApiError('forbidden', 403, undefined, 'ACCESS_DENIED'))
+        .mockRejectedValueOnce(new ApiError('conflict', 409, undefined, 'INSPECTION_NOT_REVIEWABLE'));
+
+      await expect(useAppStore.getState().rejectInspection(SENT_ID, 'motivo')).resolves.toEqual({
+        ok: false,
+        error: 'Seu perfil não pode reprovar esta inspeção.',
+        code: 'ACCESS_DENIED',
+      });
+      await expect(useAppStore.getState().rejectInspection(SENT_ID, 'motivo')).resolves.toEqual({
+        ok: false,
+        error: 'Esta inspeção não está em revisão.',
+        code: 'INSPECTION_NOT_REVIEWABLE',
+      });
     });
 
     it('returnForCorrection exige comentário e registra a devolução da API', async () => {
