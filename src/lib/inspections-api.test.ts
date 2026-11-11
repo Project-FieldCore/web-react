@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assignInspection,
   cancelInspection,
+  approveInspection,
   fetchEvidenceContent,
   fetchInspectionChecklist,
   listInspections,
@@ -460,6 +461,50 @@ describe('startReview', () => {
       jsonResponse(409, { status: 409, code: 'INSPECTION_NOT_REVIEWABLE', message: 'not reviewable' })
     );
     await expect(startReview('ins-1')).rejects.toMatchObject({
+      status: 409,
+      code: 'INSPECTION_NOT_REVIEWABLE',
+      message: 'Esta inspeção não está aguardando revisão.',
+    });
+  });
+});
+
+describe('approveInspection', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('POST /review/approve com comentário e mapeia APPROVED → APROVADA', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { ...API_INSPECTION, status: 'APPROVED', version: 5 })
+    );
+    global.fetch = fetchMock;
+
+    const update = await approveInspection('ins-1', '  Ok  ');
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/inspections\/ins-1\/review\/approve$/);
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ comentario: 'Ok' });
+    expect(update).toEqual({ id: 'ins-1', status: 'APROVADA', version: 5 });
+  });
+
+  it('omite body quando não há comentário', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { ...API_INSPECTION, status: 'APPROVED', version: 5 })
+    );
+    global.fetch = fetchMock;
+
+    await approveInspection('ins-1');
+
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
+  });
+
+  it('propaga 409 INSPECTION_NOT_REVIEWABLE', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(409, { status: 409, code: 'INSPECTION_NOT_REVIEWABLE', message: 'not reviewable' })
+    );
+    await expect(approveInspection('ins-1')).rejects.toMatchObject({
       status: 409,
       code: 'INSPECTION_NOT_REVIEWABLE',
       message: 'Esta inspeção não está aguardando revisão.',

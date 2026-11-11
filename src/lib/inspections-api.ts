@@ -209,8 +209,24 @@ export async function startReview(id: string): Promise<ReviewStartUpdate & { id:
   };
 }
 
-export function approveInspection(id: string, comentario?: string): Promise<Inspection> {
-  return http.post<Inspection>(`/inspections/${id}/review/approve`, { comentario });
+/** Campos atualizados por `POST .../review/approve` (UNDER_REVIEW→APPROVED; idempotente). */
+export type ReviewApproveUpdate = Pick<Inspection, 'status' | 'version'>;
+
+/** Aprova inspeção em revisão. Comentário opcional só vai no body se não-vazio. */
+export async function approveInspection(
+  id: string,
+  comentario?: string
+): Promise<ReviewApproveUpdate & { id: string }> {
+  const trimmed = comentario?.trim();
+  const api = await http.post<ApiInspection>(
+    `/inspections/${id}/review/approve`,
+    trimmed ? { comentario: trimmed } : undefined
+  );
+  return {
+    id: api.id,
+    status: STATUS_FROM_API[api.status],
+    version: api.version,
+  };
 }
 
 export function rejectInspection(id: string, motivo: string): Promise<Inspection> {

@@ -297,24 +297,43 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
       expect(find(SENT_ID).status).toBe('ENVIADA');
     });
 
-    it('approveInspection envia o comentário e guarda a revisão devolvida', async () => {
-      const review = { supervisorNome: 'Marina Costa', comentario: 'Ok', decidedAt: '2026-10-01T10:00:00.000Z' };
-      mocked(inspectionsApi.approveInspection).mockResolvedValue({ ...find(SENT_ID), status: 'APROVADA', review });
+    it('approveInspection aplica APROVADA e guarda comentário local', async () => {
+      useAppStore.setState({ currentUser: MOCK_USERS.find((u) => u.role === 'SUPERVISOR') ?? MOCK_USERS[0] });
+      mocked(inspectionsApi.approveInspection).mockResolvedValue({ id: SENT_ID, status: 'APROVADA', version: 4 });
 
       const result = await useAppStore.getState().approveInspection(SENT_ID, 'Ok');
 
       expect(result).toEqual({ ok: true });
       expect(inspectionsApi.approveInspection).toHaveBeenCalledWith(SENT_ID, 'Ok');
       expect(find(SENT_ID).status).toBe('APROVADA');
-      expect(find(SENT_ID).review).toEqual(review);
+      expect(find(SENT_ID).version).toBe(4);
+      expect(find(SENT_ID).review?.comentario).toBe('Ok');
     });
 
-    it('approveInspection mantém o status quando a API falha', async () => {
+    it('approveInspection traduz 403 e 409', async () => {
+      mocked(inspectionsApi.approveInspection)
+        .mockRejectedValueOnce(new ApiError('forbidden', 403, undefined, 'ACCESS_DENIED'))
+        .mockRejectedValueOnce(new ApiError('conflict', 409, undefined, 'INSPECTION_NOT_REVIEWABLE'));
+
+      await expect(useAppStore.getState().approveInspection(SENT_ID)).resolves.toEqual({
+        ok: false,
+        error: 'Seu perfil não pode aprovar esta inspeção.',
+        code: 'ACCESS_DENIED',
+      });
+      await expect(useAppStore.getState().approveInspection(SENT_ID)).resolves.toEqual({
+        ok: false,
+        error: 'Esta inspeção não está em revisão.',
+        code: 'INSPECTION_NOT_REVIEWABLE',
+      });
+      expect(find(SENT_ID).status).toBe('ENVIADA');
+    });
+
+    it('approveInspection mantém o status quando a rede falha', async () => {
       mocked(inspectionsApi.approveInspection).mockRejectedValue(new NetworkError('Sem conexão.'));
 
       const result = await useAppStore.getState().approveInspection(SENT_ID);
 
-      expect(result).toEqual({ ok: false, error: 'Sem conexão.' });
+      expect(result).toEqual({ ok: false, error: 'Não foi possível aprovar a inspeção. Tente novamente.' });
       expect(find(SENT_ID).status).toBe('ENVIADA');
     });
 
