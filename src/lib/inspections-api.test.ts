@@ -7,6 +7,7 @@ import {
   fetchInspectionChecklist,
   listInspections,
   listReviewQueue,
+  rejectInspection,
   scheduleInspection,
   startReview,
   toAssignmentUpdate,
@@ -508,6 +509,41 @@ describe('approveInspection', () => {
       status: 409,
       code: 'INSPECTION_NOT_REVIEWABLE',
       message: 'Esta inspeção não está aguardando revisão.',
+    });
+  });
+});
+
+describe('rejectInspection', () => {
+  beforeEach(() => setAuthToken('token-test'));
+  afterEach(() => {
+    setAuthToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('POST /review/reject com motivo e mapeia REJECTED → REPROVADA', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { ...API_INSPECTION, status: 'REJECTED', version: 7 })
+    );
+    global.fetch = fetchMock;
+
+    const update = await rejectInspection('ins-1', '  Evidência ausente  ');
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/inspections\/ins-1\/review\/reject$/);
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ motivo: 'Evidência ausente' });
+    expect(update).toEqual({ id: 'ins-1', status: 'REPROVADA', version: 7 });
+  });
+
+  it('propaga 400 e 409', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(400, { status: 400, code: 'VALIDATION_ERROR', message: 'blank' }))
+      .mockResolvedValueOnce(jsonResponse(409, { status: 409, code: 'INSPECTION_NOT_REVIEWABLE', message: 'not reviewable' }));
+
+    await expect(rejectInspection('ins-1', 'x')).rejects.toMatchObject({ status: 400 });
+    await expect(rejectInspection('ins-1', 'x')).rejects.toMatchObject({
+      status: 409,
+      code: 'INSPECTION_NOT_REVIEWABLE',
     });
   });
 });
