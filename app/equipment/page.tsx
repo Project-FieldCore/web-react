@@ -199,9 +199,9 @@ export default function EquipmentCatalogPage() {
       {list.status === 'error' && (
         <div className="bg-white border border-slate-200 rounded-2xl">
           <ErrorState
-            title="Não foi possível carregar os equipamentos"
+            title={list.errorCopy?.title ?? 'Não foi possível carregar os equipamentos'}
             message={list.error ?? 'Tente novamente.'}
-            onRetry={list.reload}
+            onRetry={list.errorCopy?.retry === false ? undefined : list.reload}
           />
         </div>
       )}

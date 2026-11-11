@@ -178,7 +178,13 @@ export default function InspectionsListPage() {
       </div>
 
       {list.status === 'loading' && <LoadingState label="Carregando inspeções..." />}
-      {list.status === 'error' && <ErrorState message={list.error ?? 'Não foi possível carregar as inspeções.'} onRetry={list.reload} />}
+      {list.status === 'error' && (
+        <ErrorState
+          title={list.errorCopy?.title}
+          message={list.error ?? 'Não foi possível carregar as inspeções.'}
+          onRetry={list.errorCopy?.retry === false ? undefined : list.reload}
+        />
+      )}
 
       {list.status === 'ready' && (
         <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden ${list.refreshing ? 'opacity-70' : ''}`}>
