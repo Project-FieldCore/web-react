@@ -1257,12 +1257,28 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
-    // Revisão (UC-16/UC-17): a API devolve a inspeção atualizada (status, review,
-    // correcoes) e ela substitui o registro local. supervisorNome vem da sessão no backend.
+    // Revisão (UC-16 / PBI-0059): POST .../review/start → UNDER_REVIEW (EM_REVISAO).
+    // Merge só status/version para preservar respostas locais; checklist admin vem da API (0057).
     startReview: async (inspectionId) => {
       try {
-        replaceInspection(await inspectionsApi.startReview(inspectionId));
+        const update = await inspectionsApi.startReview(inspectionId);
+        set((s) => ({
+          inspections: s.inspections.map((i) =>
+            i.id === inspectionId ? { ...i, status: update.status, version: update.version } : i
+          ),
+        }));
       } catch (error) {
+        if (error instanceof ApiError) {
+          if (error.status === 403) return { ok: false, error: 'Seu perfil não pode iniciar a revisão.', code: error.code };
+          if (error.status === 404) return { ok: false, error: 'Inspeção não encontrada.', code: error.code };
+          if (error.status === 401) return { ok: false, error: 'Sessão expirada. Entre novamente.', code: error.code };
+          if (error.code === 'INSPECTION_NOT_REVIEWABLE' || error.status === 409) {
+            return { ok: false, error: 'Esta inspeção não está aguardando revisão.', code: error.code };
+          }
+        }
+        if (error instanceof NetworkError) {
+          return { ok: false, error: 'Não foi possível iniciar a revisão. Tente novamente.' };
+        }
         return toErrorResult(error, 'Não foi possível iniciar a revisão. Tente novamente.');
       }
       pushAudit('INICIOU_REVISAO', 'Inspeção', inspectionId);

@@ -29,6 +29,7 @@ import { EvidenceViewerProvider } from '@/components/inspections/EvidenceViewerC
 export default function InspectionReviewPage() {
   const { inspectionId } = useParams<{ inspectionId: string }>();
   const router = useRouter();
+  const [fromReviewQueue, setFromReviewQueue] = useState(false);
 
   const inspection = useAppStore((s) => s.inspections.find((i) => i.id === inspectionId));
   const models = useAppStore((s) => s.models);
@@ -55,6 +56,10 @@ export default function InspectionReviewPage() {
   const [showReassign, setShowReassign] = useState(false);
   const [reassignNotice, setReassignNotice] = useState<string | null>(null);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFromReviewQueue(new URLSearchParams(window.location.search).get('from') === 'review-queue');
+  }, []);
 
   useEffect(() => {
     if (!reassignNotice) return;
@@ -93,8 +98,12 @@ export default function InspectionReviewPage() {
     return result;
   }
 
-  function handleOpenReview() {
+  async function handleOpenReview() {
     return review.run(() => startReview(inspection!.id));
+  }
+
+  function handleBack() {
+    router.push(fromReviewQueue ? '/inspections/review-queue' : '/inspections');
   }
   async function handleApprove() {
     const result = await review.run(() => approveInspection(inspection!.id, comentario || undefined));
@@ -116,7 +125,9 @@ export default function InspectionReviewPage() {
   return (
     <EvidenceViewerProvider inspectionId={inspection.id}>
     <div className="max-w-3xl mx-auto">
-      <button onClick={() => router.push('/inspections')} className="text-sm font-semibold text-slate-500 mb-4">← Voltar às inspeções</button>
+      <button type="button" onClick={handleBack} className="text-sm font-semibold text-slate-500 mb-4">
+        {fromReviewQueue ? '← Voltar à fila de revisão' : '← Voltar às inspeções'}
+      </button>
 
       <div className="flex items-start justify-between gap-3 flex-wrap mb-6">
         <div>
@@ -167,9 +178,21 @@ export default function InspectionReviewPage() {
       <CancelInspectionAction status={inspection.status} onCancel={() => setShowCancel(true)} />
 
       {inspection.status === 'ENVIADA' && (
-        <button onClick={handleOpenReview} disabled={review.pending} className="w-full bg-navy-800 text-white rounded-xl py-3 font-bold mb-5 disabled:opacity-60">
-          Iniciar revisão formal
-        </button>
+        <div className="mb-5">
+          {review.error && !showRejectForm && !showReturnForm ? (
+            <div className="mb-3">
+              <InlineError message={review.error} />
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleOpenReview()}
+            disabled={review.pending}
+            className="w-full bg-navy-800 text-white rounded-xl py-3 font-bold disabled:opacity-60"
+          >
+            {review.pending ? 'Iniciando revisão...' : 'Iniciar revisão formal'}
+          </button>
+        </div>
       )}
 
       {inspection.correcoes && inspection.correcoes.length > 0 && (
@@ -190,7 +213,11 @@ export default function InspectionReviewPage() {
 
       <InspectionReviewChecklist inspectionId={inspection.id} />
 
-      {review.error && !showRejectForm && !showReturnForm && <div className="mb-3"><InlineError message={review.error} /></div>}
+      {review.error && inspection.status !== 'ENVIADA' && !showRejectForm && !showReturnForm && (
+        <div className="mb-3">
+          <InlineError message={review.error} />
+        </div>
+      )}
 
       {canReview && !showRejectForm && !showReturnForm && (
         <div className="flex flex-col sm:flex-row gap-3">

@@ -269,13 +269,32 @@ describe('useAppStore agendamento, execução, revisão e NC — #135', () => {
   });
 
   describe('revisão', () => {
-    it('startReview substitui a inspeção pela versão da API', async () => {
-      mocked(inspectionsApi.startReview).mockResolvedValue({ ...find(SENT_ID), status: 'EM_REVISAO' });
+    it('startReview aplica status EM_REVISAO e version da API', async () => {
+      mocked(inspectionsApi.startReview).mockResolvedValue({ id: SENT_ID, status: 'EM_REVISAO', version: 3 });
 
       const result = await useAppStore.getState().startReview(SENT_ID);
 
       expect(result).toEqual({ ok: true });
       expect(find(SENT_ID).status).toBe('EM_REVISAO');
+      expect(find(SENT_ID).version).toBe(3);
+    });
+
+    it('startReview traduz 403 e 409 INSPECTION_NOT_REVIEWABLE', async () => {
+      mocked(inspectionsApi.startReview)
+        .mockRejectedValueOnce(new ApiError('forbidden', 403, undefined, 'ACCESS_DENIED'))
+        .mockRejectedValueOnce(new ApiError('conflict', 409, undefined, 'INSPECTION_NOT_REVIEWABLE'));
+
+      await expect(useAppStore.getState().startReview(SENT_ID)).resolves.toEqual({
+        ok: false,
+        error: 'Seu perfil não pode iniciar a revisão.',
+        code: 'ACCESS_DENIED',
+      });
+      await expect(useAppStore.getState().startReview(SENT_ID)).resolves.toEqual({
+        ok: false,
+        error: 'Esta inspeção não está aguardando revisão.',
+        code: 'INSPECTION_NOT_REVIEWABLE',
+      });
+      expect(find(SENT_ID).status).toBe('ENVIADA');
     });
 
     it('approveInspection envia o comentário e guarda a revisão devolvida', async () => {

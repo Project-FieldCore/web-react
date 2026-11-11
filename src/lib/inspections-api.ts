@@ -196,8 +196,17 @@ export function inspectionStatusToApi(status: InspectionStatus): ApiInspectionSt
   return STATUS_TO_API[status];
 }
 
-export function startReview(id: string): Promise<Inspection> {
-  return http.post<Inspection>(`/inspections/${id}/review/start`);
+/** Campos da inspeção atualizados por `POST .../review/start` (SUBMITTED→UNDER_REVIEW; idempotente). */
+export type ReviewStartUpdate = Pick<Inspection, 'status' | 'version'>;
+
+/** Inicia revisão formal. Resposta da API é o contrato `Inspection` (status UNDER_REVIEW). */
+export async function startReview(id: string): Promise<ReviewStartUpdate & { id: string }> {
+  const api = await http.post<ApiInspection>(`/inspections/${id}/review/start`);
+  return {
+    id: api.id,
+    status: STATUS_FROM_API[api.status],
+    version: api.version,
+  };
 }
 
 export function approveInspection(id: string, comentario?: string): Promise<Inspection> {
