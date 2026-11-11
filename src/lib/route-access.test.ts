@@ -9,7 +9,15 @@ describe('isAllowed', () => {
   });
 
   it('SUPERVISOR acessa as rotas operacionais', () => {
-    for (const path of ['/', '/models', '/schedule', '/inspections', '/inspections/abc', '/non-conformities']) {
+    for (const path of [
+      '/',
+      '/models',
+      '/schedule',
+      '/inspections',
+      '/inspections/abc',
+      '/inspections/review-queue',
+      '/non-conformities',
+    ]) {
       expect(isAllowed(path, 'SUPERVISOR')).toBe(true);
     }
   });
