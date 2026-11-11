@@ -87,6 +87,7 @@ export default function ReviewQueuePage() {
   const users = useAppStore((s) => s.users);
   const loadClients = useAppStore((s) => s.loadClients);
   const loadUsers = useAppStore((s) => s.loadUsers);
+  const ensureInspectionFromReviewQueue = useAppStore((s) => s.ensureInspectionFromReviewQueue);
   const technicians = users.filter((u) => u.role === 'TECHNICIAN' && u.status === 'ATIVO');
 
   const list = usePagedList<ReviewQueueItem, ReviewQueueFilters>(
@@ -231,6 +232,7 @@ export default function ReviewQueuePage() {
                     <Link
                       href={`/inspections/${item.id}?from=review-queue`}
                       aria-label={`Abrir inspeção ${item.title} para revisão`}
+                      onClick={() => ensureInspectionFromReviewQueue(item)}
                     >
                       {item.title}
                     </Link>
@@ -276,6 +278,7 @@ export default function ReviewQueuePage() {
                 href={`/inspections/${item.id}?from=review-queue`}
                 aria-label={`Abrir inspeção ${item.title} para revisão`}
                 className="block p-4 hover:bg-slate-50"
+                onClick={() => ensureInspectionFromReviewQueue(item)}
               >
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="min-w-0">

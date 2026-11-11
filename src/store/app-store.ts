@@ -199,6 +199,8 @@ interface AppState {
   approveInspection: (inspectionId: string, comentario?: string) => Promise<Result>;
   rejectInspection: (inspectionId: string, motivo: string) => Promise<Result>;
   returnForCorrection: (inspectionId: string, comentario: string) => Promise<Result>;
+  /** Hidrata stub local a partir da fila (review-queue → detail sem item no store). */
+  ensureInspectionFromReviewQueue: (item: import('@/lib/inspections-api').ReviewQueueItem) => void;
   /**
    * Cancela com justificativa (RN-029); aprovada não cancela pelo fluxo comum (RN-030).
    * Registra usuário, data e justificativa. Ainda só na tela: o backend não tem endpoint de cancelar.
@@ -1285,14 +1287,64 @@ export const useAppStore = create<AppState>()(
       return { ok: true };
     },
 
+    // PBI-0060: POST .../review/approve → APPROVED (APROVADA). Merge status/version + review local.
     approveInspection: async (inspectionId, comentario) => {
       try {
-        replaceInspection(await inspectionsApi.approveInspection(inspectionId, comentario));
+        const update = await inspectionsApi.approveInspection(inspectionId, comentario);
+        const supervisorNome = get().currentUser?.nome ?? 'Supervisor';
+        const trimmed = comentario?.trim();
+        set((s) => ({
+          inspections: s.inspections.map((i) =>
+            i.id === inspectionId
+              ? {
+                  ...i,
+                  status: update.status,
+                  version: update.version,
+                  review: {
+                    supervisorNome,
+                    comentario: trimmed || undefined,
+                    decidedAt: new Date().toISOString(),
+                  },
+                }
+              : i
+          ),
+        }));
       } catch (error) {
+        if (error instanceof ApiError) {
+          if (error.status === 403) return { ok: false, error: 'Seu perfil não pode aprovar esta inspeção.', code: error.code };
+          if (error.status === 404) return { ok: false, error: 'Inspeção não encontrada.', code: error.code };
+          if (error.status === 401) return { ok: false, error: 'Sessão expirada. Entre novamente.', code: error.code };
+          if (error.code === 'INSPECTION_NOT_REVIEWABLE' || error.status === 409) {
+            return { ok: false, error: 'Esta inspeção não está em revisão.', code: error.code };
+          }
+        }
+        if (error instanceof NetworkError) {
+          return { ok: false, error: 'Não foi possível aprovar a inspeção. Tente novamente.' };
+        }
         return toErrorResult(error, 'Não foi possível aprovar a inspeção. Tente novamente.');
       }
       pushAudit('APROVOU', 'Inspeção', inspectionId, comentario);
       return { ok: true };
+    },
+
+    ensureInspectionFromReviewQueue: (item) => {
+      set((s) => {
+        if (s.inspections.some((i) => i.id === item.id)) return s;
+        const stub: Inspection = {
+          id: item.id,
+          clienteId: item.clientId,
+          localId: item.siteId,
+          tecnicoId: item.technicianId,
+          modeloId: '',
+          modeloVersao: 0,
+          prioridade: item.prioridade,
+          dataPrevista: item.scheduledFor,
+          status: 'ENVIADA',
+          answers: {},
+          nonConformities: {},
+        };
+        return { inspections: [...s.inspections, stub] };
+      });
     },
 
     // RN-080: reprovação deve possuir motivo obrigatório.

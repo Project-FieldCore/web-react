@@ -81,7 +81,8 @@ export default function InspectionReviewPage() {
   const equip = equipment.find((e) => e.id === inspection.equipamentoId);
   const tech = users.find((u) => u.id === inspection.tecnicoId);
 
-  const canReview = inspection.status === 'ENVIADA' || inspection.status === 'EM_REVISAO';
+  // PBI-0060: decisões (aprovar/reprovar/devolver) só em EM_REVISAO — ENVIADA usa só “Iniciar revisão”.
+  const canReview = inspection.status === 'EM_REVISAO';
 
   async function handleReassign(tecnicoId: string) {
     const result = await reassignInspection(inspection!.id, tecnicoId);
@@ -106,8 +107,7 @@ export default function InspectionReviewPage() {
     router.push(fromReviewQueue ? '/inspections/review-queue' : '/inspections');
   }
   async function handleApprove() {
-    const result = await review.run(() => approveInspection(inspection!.id, comentario || undefined));
-    if (result.ok) router.push('/inspections');
+    await review.run(() => approveInspection(inspection!.id, comentario || undefined));
   }
   async function handleReject() {
     setRejectError(null);
@@ -213,36 +213,50 @@ export default function InspectionReviewPage() {
 
       <InspectionReviewChecklist inspectionId={inspection.id} />
 
-      {review.error && inspection.status !== 'ENVIADA' && !showRejectForm && !showReturnForm && (
-        <div className="mb-3">
-          <InlineError message={review.error} />
-        </div>
-      )}
-
       {canReview && !showRejectForm && !showReturnForm && (
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button onClick={() => setShowRejectForm(true)} className="flex-1 bg-white border border-red-200 text-red-600 rounded-xl py-3 font-bold">
-            Reprovar
-          </button>
-          <button onClick={() => setShowReturnForm(true)} className="flex-1 bg-white border border-orange-200 text-orange-600 rounded-xl py-3 font-bold">
-            Devolver para correção
-          </button>
-          <button onClick={handleApprove} disabled={review.pending} className="flex-1 bg-brandgreen-600 text-white rounded-xl py-3 font-bold disabled:opacity-60">
-            {review.pending ? 'Salvando...' : 'Aprovar'}
-          </button>
-        </div>
-      )}
-
-      {canReview && !showRejectForm && !showReturnForm && (
-        <div className="mt-3">
-          <textarea
-            value={comentario}
-            onChange={(e) => setComentario(e.target.value)}
-            placeholder="Comentário de revisão (opcional)"
-            rows={2}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-          />
-        </div>
+        <>
+          {review.error ? (
+            <div className="mb-3">
+              <InlineError message={review.error} />
+            </div>
+          ) : null}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={() => setShowRejectForm(true)}
+              disabled={review.pending}
+              className="flex-1 bg-white border border-red-200 text-red-600 rounded-xl py-3 font-bold disabled:opacity-60"
+            >
+              Reprovar
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowReturnForm(true)}
+              disabled={review.pending}
+              className="flex-1 bg-white border border-orange-200 text-orange-600 rounded-xl py-3 font-bold disabled:opacity-60"
+            >
+              Devolver para correção
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleApprove()}
+              disabled={review.pending}
+              className="flex-1 bg-brandgreen-600 text-white rounded-xl py-3 font-bold disabled:opacity-60"
+            >
+              {review.pending ? 'Salvando...' : 'Aprovar'}
+            </button>
+          </div>
+          <div className="mt-3">
+            <textarea
+              value={comentario}
+              onChange={(e) => setComentario(e.target.value)}
+              placeholder="Comentário de revisão (opcional)"
+              rows={2}
+              disabled={review.pending}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:opacity-60"
+            />
+          </div>
+        </>
       )}
 
       {showRejectForm && (
