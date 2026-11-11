@@ -256,7 +256,11 @@ function LocationsSection({ client }: { client: Client }) {
 
       {list.status === 'error' && (
         <div className="bg-white border border-slate-200 rounded-2xl">
-          <ErrorState title="Não foi possível carregar os locais" message={list.error ?? 'Tente novamente.'} onRetry={list.reload} />
+          <ErrorState
+            title={list.errorCopy?.title ?? 'Não foi possível carregar os locais'}
+            message={list.error ?? 'Tente novamente.'}
+            onRetry={list.errorCopy?.retry === false ? undefined : list.reload}
+          />
         </div>
       )}
 

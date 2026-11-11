@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
+import { OfflineBanner } from '@/components/States';
 import { Sidebar } from '@/components/Sidebar';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { PUBLIC_ROUTES, isAllowed } from '@/lib/route-access';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const currentUser = useAppStore((s) => s.currentUser);
+  const online = useOnlineStatus();
   const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
 
   // A sessão é reidratada da sessionStorage de forma assíncrona (só existe no
@@ -61,6 +64,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <>
       <div className="print:hidden">
         <Sidebar />
+      </div>
+      <div className="print:hidden lg:pl-72">
+        <OfflineBanner online={online} />
       </div>
       <main className="min-h-screen min-w-0 pt-20 pb-8 px-4 sm:px-6 lg:pt-8 lg:pb-8 lg:pl-72 lg:pr-8 print:p-0">{children}</main>
     </>

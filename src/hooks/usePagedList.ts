@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ApiError, NetworkError } from '@/lib/http';
+import { describeLoadError, type LoadErrorCopy } from '@/lib/state-copy';
 import {
   initialPagedListState,
   pagedListReducer,
@@ -38,6 +38,7 @@ export function usePagedList<T, F extends object>(
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [errorCopy, setErrorCopy] = useState<LoadErrorCopy | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -65,6 +66,7 @@ export function usePagedList<T, F extends object>(
         setMeta(response.page);
         setStatus('ready');
         setError(null);
+        setErrorCopy(null);
         setRefreshing(false);
         onLoadedRef.current?.(response.items);
         if (response.items.length === 0 && response.page.totalPages > 0) {
@@ -73,12 +75,10 @@ export function usePagedList<T, F extends object>(
       })
       .catch((err: unknown) => {
         if (requestId !== latestRequest.current) return;
+        const copy = describeLoadError(err, 'Não foi possível carregar a lista. Tente novamente.');
         setStatus('error');
-        setError(
-          err instanceof ApiError || err instanceof NetworkError
-            ? err.message
-            : 'Não foi possível carregar a lista. Tente novamente.'
-        );
+        setError(copy.message);
+        setErrorCopy(copy);
         setRefreshing(false);
       });
   }, [state.page, state.size, state.sort, state.q, state.filters, reloadToken]);
@@ -95,6 +95,8 @@ export function usePagedList<T, F extends object>(
     meta,
     status,
     error,
+    /** Structured 14.15 load error (title / retry) for ErrorState. */
+    errorCopy,
     refreshing,
     reload,
     page: state.page,

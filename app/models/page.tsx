@@ -99,7 +99,22 @@ export default function ModelsPage() {
 
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl">
-          <EmptyState title="Nenhum modelo encontrado" description="Ajuste os filtros ou a busca para ver outros resultados." />
+          <EmptyState
+            title="Nenhum modelo encontrado"
+            description="Ajuste os filtros ou a busca para ver outros resultados."
+            action={
+              statusFilter !== 'TODOS' || categoryFilter !== 'TODAS' || search.trim()
+                ? {
+                    label: 'Limpar filtros',
+                    onClick: () => {
+                      setStatusFilter('TODOS');
+                      setCategoryFilter('TODAS');
+                      setSearch('');
+                    },
+                  }
+                : undefined
+            }
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

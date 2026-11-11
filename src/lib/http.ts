@@ -28,7 +28,7 @@ export class ApiError extends Error {
 }
 
 export class NetworkError extends Error {
-  constructor(message = 'Não foi possível conectar à API. Verifique sua conexão e tente novamente.') {
+  constructor(message = 'Sem conexão. Verifique a rede e tente novamente.') {
     super(message);
     this.name = 'NetworkError';
   }

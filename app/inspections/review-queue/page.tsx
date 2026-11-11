@@ -14,6 +14,7 @@ import {
   SUBMITTED_PERIOD_ORDER_MESSAGE,
   toSubmittedIso,
 } from '@/lib/review-queue-filters';
+import { FORBIDDEN_MESSAGE, describeLoadError } from '@/lib/state-copy';
 import { usePagedList } from '@/hooks/usePagedList';
 
 const SORT_OPTIONS: SortOption[] = [
@@ -41,20 +42,6 @@ const INITIAL_FILTERS: ReviewQueueFilters = {
 
 function reviewQueueErrorCopy(error: unknown): { title: string; message: string; retry: boolean } {
   if (error instanceof ApiError) {
-    if (error.status === 403) {
-      return {
-        title: 'Acesso não autorizado',
-        message: 'Seu perfil não pode consultar a fila de revisão.',
-        retry: false,
-      };
-    }
-    if (error.status === 401) {
-      return {
-        title: 'Não foi possível carregar a fila',
-        message: 'Sessão expirada. Entre novamente.',
-        retry: false,
-      };
-    }
     if (error.code === 'INVALID_DATE_RANGE') {
       return {
         title: 'Não foi possível carregar a fila',
@@ -62,19 +49,19 @@ function reviewQueueErrorCopy(error: unknown): { title: string; message: string;
         retry: true,
       };
     }
-    if (error.status === 400) {
+    if (error.status === 400 && error.code !== 'ACCESS_DENIED') {
       return {
         title: 'Não foi possível carregar a fila',
         message: 'Não foi possível aplicar os filtros. Verifique os valores informados.',
         retry: true,
       };
     }
-    return { title: 'Não foi possível carregar a fila', message: error.message, retry: true };
   }
+  const copy = describeLoadError(error, 'Não foi possível carregar a fila.');
   return {
-    title: 'Não foi possível carregar a fila',
-    message: error instanceof Error ? error.message : 'Não foi possível carregar a fila.',
-    retry: true,
+    title: copy.title === 'Algo deu errado' ? 'Não foi possível carregar a fila' : copy.title,
+    message: copy.message,
+    retry: copy.retry,
   };
 }
 
@@ -137,8 +124,8 @@ export default function ReviewQueuePage() {
   }, [reloadQueue]);
 
   const periodInvalid = isSubmittedPeriodInvalid(list.filters.submittedFrom, list.filters.submittedTo);
-  const isForbidden = list.error === 'Seu perfil não pode consultar a fila de revisão.';
-  const isUnauthorized = list.error === 'Sessão expirada. Entre novamente.';
+  const isForbidden = list.error === FORBIDDEN_MESSAGE || list.errorCopy?.status === 403;
+  const isUnauthorized = list.errorCopy?.status === 401 || list.error === 'Sessão expirada. Entre novamente.';
 
   return (
     <div className="w-full min-w-0">
@@ -194,9 +181,9 @@ export default function ReviewQueuePage() {
       {list.status === 'loading' && !periodInvalid && <LoadingState label="Carregando fila de revisão..." />}
       {list.status === 'error' && !periodInvalid && (
         <ErrorState
-          title={isForbidden ? 'Acesso não autorizado' : 'Não foi possível carregar a fila'}
+          title={list.errorCopy?.title ?? (isForbidden ? 'Acesso não autorizado' : 'Não foi possível carregar a fila')}
           message={list.error ?? 'Não foi possível carregar a fila.'}
-          onRetry={isForbidden || isUnauthorized ? undefined : list.reload}
+          onRetry={isForbidden || isUnauthorized || list.errorCopy?.retry === false ? undefined : list.reload}
         />
       )}
 
