@@ -12,7 +12,7 @@ Ambientes suportados neste pipeline: **development** e **production** apenas.
 
 `NEXT_PUBLIC_API_BASE_URL` é definido no **build** do GitHub Actions (Environment variable). Alterar a URL da API exige novo deploy — o host não reaplica essa variável em runtime.
 
-Artefato publicado: conteúdo de `.next/standalone` + `.next/static` + `public` (servidor `node server.js`).
+Artefato publicado: conteúdo de `.next/standalone` + `.next/static` + `public` (servidor `node server.js`). O diretório oculto `.next` **deve** chegar no host (`BUILD_ID` presente); o pipeline usa `include-hidden-files` + tarball — não use `publish/*` no SCP (o glob bash omite `.next`).
 
 ---
 

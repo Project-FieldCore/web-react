@@ -71,13 +71,18 @@ jobs:
             cp -a public/. publish/public/
           fi
           test -f publish/server.js
+          # Hidden .next must be present — Next standalone will not start without it.
+          test -f publish/.next/BUILD_ID
           ls -la publish/
+          ls -la publish/.next/ | head -20
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: publish/
+          # Default omits dot-directories; without this, .next never reaches the deploy job.
+          include-hidden-files: true
           retention-days: 7
 
   deploy-ec2-dev:
@@ -99,6 +104,14 @@ jobs:
           name: ${{ env.ARTIFACT_NAME }}
           path: ./publish
 
+      - name: Pack publish tarball (includes hidden .next)
+        run: |
+          set -euo pipefail
+          test -f publish/.next/BUILD_ID
+          # tar preserves .next; bash globs like publish/* would skip it.
+          tar -C publish -czf publish.tar.gz .
+          ls -lh publish.tar.gz
+
       - name: Backup logs on EC2 DEV
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
@@ -116,18 +129,17 @@ jobs:
               echo "Sem logs; pulando backup."
             fi
 
-      - name: "SCP: stage publish to /tmp on EC2 DEV"
+      - name: "SCP: publish.tar.gz to /tmp on EC2 DEV"
         uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
         with:
           host: ${{ secrets.AWS_HOST }}
           username: ${{ secrets.AWS_USER }}
           key: ${{ secrets.AWS_SSH_KEY }}
-          source: "./publish/*"
+          source: "./publish.tar.gz"
           target: "${{ env.STAGE_DIR }}"
-          strip_components: 1
           overwrite: true
 
-      - name: Rsync + restore logs (DEV)
+      - name: Extract tarball + rsync + restore logs (DEV)
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.AWS_HOST }}
@@ -137,8 +149,15 @@ jobs:
             set -e
             STAGE="${{ env.STAGE_DIR }}"
             TARGET="${{ vars.TARGET_DIR }}"
-            sudo mkdir -p "${TARGET}/logs"
-            sudo rsync -a "${STAGE}/" "${TARGET}/"
+            TREE="${STAGE}/tree"
+            sudo mkdir -p "${TREE}" "${TARGET}/logs"
+            sudo tar -xzf "${STAGE}/publish.tar.gz" -C "${TREE}"
+            if [ ! -f "${TREE}/.next/BUILD_ID" ]; then
+              echo "ERROR: .next/BUILD_ID missing after extract — aborting deploy." >&2
+              ls -la "${TREE}" >&2 || true
+              exit 1
+            fi
+            sudo rsync -a "${TREE}/" "${TARGET}/"
             sudo rm -rf "${STAGE}"
             if [ -d "${{ env.LOGS_BACKUP }}" ]; then
               sudo rm -rf "${TARGET}/logs"
@@ -146,6 +165,8 @@ jobs:
               echo "Logs restaurados."
             fi
             sudo chown -R "$(whoami):$(whoami)" "${TARGET}" || true
+            test -f "${TARGET}/.next/BUILD_ID"
+            echo "Deploy tree OK (.next present)."
 
       - name: Patch application + restart (DEV)
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
