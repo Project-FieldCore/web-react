@@ -1,33 +1,34 @@
-name: CI
+name: "0. [Auto] Pull Request Validation"
 
+# Gate: require this check on develop before merge.
+# Deploy workflows build again; they must not be the only quality gate.
 on:
   pull_request:
-  push:
     branches:
       - develop
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-web-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  lint-types-build:
-    name: lint · typecheck · build
+  pull-request-validation:
+    name: Pull Request Validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Setup Node.js LTS
+      - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -42,5 +43,5 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Build does not call the API; placeholder keeps NEXT_PUBLIC_* consistent.
+          # Placeholder only for PR gate; deploy workflows bake the real API URL.
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1

@@ -1,0 +1,159 @@
+name: "2. [Manual] Deploy — Production"
+
+# Separate EC2 from DEV (different AWS_HOST on Environment production).
+# Run only when the production host is provisioned.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  ARTIFACT_NAME: published-fieldops-web-prd
+  STAGE_DIR: /tmp/fieldops-web-github-deploy-prd
+  LOGS_BACKUP: /tmp/fieldops-web-logs-backup-prd
+  SYSTEMD_SERVICE_FALLBACK: fieldops-web.service
+  PATCH_SCRIPT_ENVS: >-
+    DEPLOY_TARGET,SERVER_PORT,SYSTEMD_SERVICE_NAME,SYSTEMD_SERVICE_FALLBACK
+
+jobs:
+  build-and-publish:
+    name: Build & publish web
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Require NEXT_PUBLIC_API_BASE_URL
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+        run: |
+          if [ -z "${NEXT_PUBLIC_API_BASE_URL}" ]; then
+            echo "::error::NEXT_PUBLIC_API_BASE_URL is required on Environment production (baked at build time)."
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_API_BASE_URL is set (length ${#NEXT_PUBLIC_API_BASE_URL})."
+
+      - name: Build (standalone)
+        # NEXT_PUBLIC_* is inlined at build time — changing the API URL requires a new deploy.
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+
+      - name: Stage publish artifact
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          cp -a .next/standalone/. publish/
+          mkdir -p publish/.next/static
+          cp -a .next/static/. publish/.next/static/
+          if [ -d public ]; then
+            mkdir -p publish/public
+            cp -a public/. publish/public/
+          fi
+          test -f publish/server.js
+          ls -la publish/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: publish/
+          retention-days: 7
+
+  deploy-ec2-prd:
+    name: Deploy to EC2 Production
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (patch script)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: |
+            .github/scripts
+
+      - name: Download published artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./publish
+
+      - name: Backup logs on EC2 PRD
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ${{ secrets.AWS_USER }}
+          key: ${{ secrets.AWS_SSH_KEY }}
+          script: |
+            set -e
+            LOGS="${{ vars.TARGET_DIR }}/logs"
+            if [ -d "$LOGS" ]; then
+              sudo rm -rf "${{ env.LOGS_BACKUP }}"
+              sudo cp -a "$LOGS" "${{ env.LOGS_BACKUP }}"
+              echo "Backup logs OK."
+            else
+              echo "Sem logs; pulando backup."
+            fi
+
+      - name: "SCP: stage publish to /tmp on EC2 PRD"
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ${{ secrets.AWS_USER }}
+          key: ${{ secrets.AWS_SSH_KEY }}
+          source: "./publish/*"
+          target: "${{ env.STAGE_DIR }}"
+          strip_components: 1
+          overwrite: true
+
+      - name: Rsync + restore logs (PRD)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ${{ secrets.AWS_USER }}
+          key: ${{ secrets.AWS_SSH_KEY }}
+          script: |
+            set -e
+            STAGE="${{ env.STAGE_DIR }}"
+            TARGET="${{ vars.TARGET_DIR }}"
+            sudo mkdir -p "${TARGET}/logs"
+            sudo rsync -a "${STAGE}/" "${TARGET}/"
+            sudo rm -rf "${STAGE}"
+            if [ -d "${{ env.LOGS_BACKUP }}" ]; then
+              sudo rm -rf "${TARGET}/logs"
+              sudo mv "${{ env.LOGS_BACKUP }}" "${TARGET}/logs"
+              echo "Logs restaurados."
+            fi
+            sudo chown -R "$(whoami):$(whoami)" "${TARGET}" || true
+
+      - name: Patch application + restart (PRD)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_TARGET: ${{ vars.TARGET_DIR }}
+          SERVER_PORT: ${{ vars.SERVER_PORT }}
+          SYSTEMD_SERVICE_NAME: ${{ vars.SYSTEMD_SERVICE }}
+          SYSTEMD_SERVICE_FALLBACK: ${{ env.SYSTEMD_SERVICE_FALLBACK }}
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ${{ secrets.AWS_USER }}
+          key: ${{ secrets.AWS_SSH_KEY }}
+          script_path: .github/scripts/patch-application-ec2.sh
+          envs: ${{ env.PATCH_SCRIPT_ENVS }}
