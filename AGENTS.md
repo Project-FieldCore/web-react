@@ -7,7 +7,7 @@ Contexto canônico (qualquer IA):
 
 - Stack: Next.js (App Router) + TypeScript + Tailwind ([ADR 0002](https://github.com/Project-FieldCore/docs/blob/main/DECISIONS/0002-web-nextjs-instead-of-angular.md))
 - Branch de integração: `develop`
-- CI local: [docs/CI.md](docs/CI.md) → `npm ci && npm run lint && npm run typecheck && npm run build`
+- CI/CD: [docs/CI.md](docs/CI.md) → PR validation `npm ci && npm run lint && npm run typecheck && npm run build`; deploy EC2: [docs/DEPLOY_EC2.md](docs/DEPLOY_EC2.md), secrets: [docs/SECRETS.md](docs/SECRETS.md)
 - Estados de UI: `src/components/States.tsx`
 - Título de PR: `[PBI-XXXX] …` ou `[PBI-XXXX.N] …`
 

@@ -1,19 +1,13 @@
-# CI — web-react
+# CI/CD — web-react
 
-Pipeline mínimo de qualidade no GitHub Actions (`.github/workflows/ci.yml`).
+Actions pinned to commit SHAs; least-privilege `permissions`.
 
-## O que roda
+## Pull Request Validation
 
-Em todo `pull_request` e em push para `develop` / `main`:
+Workflow: `.github/workflows/pull-request-validation.yml`  
+Name: **0. [Auto] Pull Request Validation**
 
-1. `npm ci`
-2. `npm run lint` — ESLint via `next lint` (`next/core-web-vitals` + `next/typescript`)
-3. `npm run typecheck` — `tsc --noEmit`
-4. `npm run build` — build de produção Next.js
-
-Actions pinadas por SHA; cache npm via `actions/setup-node`. Node **22** (LTS).
-
-## Local
+Runs on pull requests targeting `develop` / `main` (and manual `workflow_dispatch`).
 
 ```bash
 npm ci
@@ -22,4 +16,43 @@ npm run typecheck
 npm run build
 ```
 
-Convenção global dos 3 repos de código: [CI_CONVENTION.md](https://github.com/Project-FieldCore/docs/blob/main/PROJECT_MANAGEMENT/CI_CONVENTION.md).
+- Node **22** (LTS) with npm cache
+- Build uses a placeholder `NEXT_PUBLIC_API_BASE_URL` (no live API call)
+- Quality gate only — deploy workflows rebuild for standalone publish
+
+**Branch protection:** require this check on `develop` before merge. Deploy DEV
+rebuilds the Next.js standalone bundle after merge and relies on that gate.
+
+## Deploy DEV (automatic)
+
+Workflow: `.github/workflows/deploy-dev.yml`  
+Triggers: `push` to `develop` + `workflow_dispatch`  
+Environment: `development`
+
+1. `npm ci` + `npm run build` with `vars.NEXT_PUBLIC_API_BASE_URL` (**baked at build time**)
+2. Stage `.next/standalone` + `.next/static` + `public`
+3. SCP/rsync to EC2, patch `fieldops-web.env`, restart systemd, health check `http://127.0.0.1:${SERVER_PORT}/`
+
+## Deploy Production (manual)
+
+Workflow: `.github/workflows/deploy-production.yml`  
+Trigger: `workflow_dispatch` only  
+Environment: `production` (separate EC2 — different `AWS_HOST`)
+
+Same shape as DEV; paths/service names **without** `dev-` prefix.
+
+## Docs
+
+- Host bootstrap (Node 22, Nginx → 3000, systemd `node server.js`, SG): [DEPLOY_EC2.md](DEPLOY_EC2.md)
+- Secrets/variables from scratch: [SECRETS.md](SECRETS.md)
+
+## Run the same checks locally
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+No EC2 secrets are required for PR validation.
