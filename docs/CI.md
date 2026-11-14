@@ -30,8 +30,8 @@ Triggers: `push` to `develop` + `workflow_dispatch`
 Environment: `development`
 
 1. `npm ci` + `npm run build` with `vars.NEXT_PUBLIC_API_BASE_URL` (**baked at build time**)
-2. Stage `.next/standalone` + `.next/static` + `public`
-3. SCP/rsync to EC2, patch `fieldops-web.env`, restart systemd, health check `http://127.0.0.1:${SERVER_PORT}/`
+2. Stage `.next/standalone` + `.next/static` + `public` (must include hidden `.next`; CI asserts `publish/.next/BUILD_ID`)
+3. Upload with `include-hidden-files: true`, transfer as `publish.tar.gz` (not `publish/*`), extract/rsync on EC2, patch `fieldops-web.env`, restart systemd, health check `http://127.0.0.1:${SERVER_PORT}/`
 
 ## Deploy Production (manual)
 
