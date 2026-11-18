@@ -40,4 +40,8 @@ describe('AnswerHistoryToggle', () => {
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('Marina Costa');
   });
+  it('sem contagem enquanto carrega ou em erro', () => {
+    expect(renderToStaticMarkup(<AnswerHistoryToggle itemId="it1" revisions={[]} status="loading" />)).not.toContain('(0)');
+    expect(renderToStaticMarkup(<AnswerHistoryToggle itemId="it1" revisions={[]} status="error" />)).toContain('>Histórico<');
+  });
 });

@@ -1,4 +1,4 @@
-import type { Answer, AnswerRevision, AnswerSnapshot, ConformityAnswer, User } from '@/types';
+import type { AnswerRevision, AnswerSnapshot, ConformityAnswer } from '@/types';
 
 export const NO_ANSWER_LABEL = 'Sem resposta';
 export const EMPTY_HISTORY_MESSAGE = 'Nenhuma alteração registrada para esta resposta.';
@@ -9,20 +9,64 @@ const CONFORMITY_LABEL: Record<ConformityAnswer, string> = {
   NAO_APLICAVEL: 'Não aplicável',
 };
 
-/** Só o que é auditável: o que a pessoa respondeu (fotos e contagens ficam de fora). */
-export function toSnapshot(answer: Answer | undefined): AnswerSnapshot | undefined {
-  if (!answer) return undefined;
+const API_CONFORMITY: Record<string, ConformityAnswer> = {
+  CONFORMING: 'CONFORME',
+  NON_CONFORMING: 'NAO_CONFORME',
+  NOT_APPLICABLE: 'NAO_APLICAVEL',
+};
+
+/** Valores de uma resposta como a API devolve no histórico (InspectionResponseHistoryValues). */
+export interface ApiHistoryValues {
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBoolean?: boolean | null;
+  valueDate?: string | null;
+  conformity?: string | null;
+  observation?: string | null;
+}
+
+/** Entrada do histórico (InspectionResponseHistoryEntry — GET /inspections/{id}/response-history). */
+export interface ApiResponseHistoryEntry {
+  id: string;
+  inspectionItemId: string;
+  action: 'CREATED' | 'UPDATED';
+  previous?: ApiHistoryValues | null;
+  current: ApiHistoryValues;
+  changedBy: string;
+  changedByName: string;
+  changedAt: string;
+}
+
+/** Converte os valores da API no resumo exibido (conformidade, valor e observação). */
+export function snapshotFromApi(values: ApiHistoryValues | null | undefined): AnswerSnapshot | undefined {
+  if (!values) return undefined;
   const snapshot: AnswerSnapshot = {};
-  if (answer.conformity) snapshot.conformity = answer.conformity;
-  if (answer.value?.trim()) snapshot.value = answer.value;
-  if (answer.observacao?.trim()) snapshot.observacao = answer.observacao;
+  const conformity = values.conformity ? API_CONFORMITY[values.conformity] : undefined;
+  if (conformity) snapshot.conformity = conformity;
+  const value =
+    values.valueText?.trim() ? values.valueText
+    : values.valueNumber != null ? String(values.valueNumber)
+    : values.valueBoolean != null ? (values.valueBoolean ? 'Sim' : 'Não')
+    : values.valueDate ? values.valueDate
+    : undefined;
+  if (value) snapshot.value = value;
+  if (values.observation?.trim()) snapshot.observacao = values.observation;
   return snapshot;
 }
 
-function sameSnapshot(a: AnswerSnapshot | undefined, b: AnswerSnapshot | undefined): boolean {
-  return (a?.conformity ?? null) === (b?.conformity ?? null)
-    && (a?.value ?? null) === (b?.value ?? null)
-    && (a?.observacao ?? null) === (b?.observacao ?? null);
+/** Entrada da API → revisão da tela. A primeira resposta (CREATED) não tem "antes". */
+export function toRevision(inspectionId: string, entry: ApiResponseHistoryEntry): AnswerRevision {
+  const anterior = entry.action === 'CREATED' ? undefined : snapshotFromApi(entry.previous);
+  return {
+    id: entry.id,
+    inspectionId,
+    itemId: entry.inspectionItemId,
+    autorNome: entry.changedByName,
+    autorId: entry.changedBy,
+    em: entry.changedAt,
+    anterior: anterior && Object.keys(anterior).length > 0 ? anterior : undefined,
+    novo: snapshotFromApi(entry.current) ?? {},
+  };
 }
 
 /** Resumo legível: "Conforme", "Não conforme · obs: ..." ou o valor digitado. */
@@ -31,34 +75,6 @@ export function describeSnapshot(snapshot: AnswerSnapshot | undefined): string {
   const main = snapshot.conformity ? CONFORMITY_LABEL[snapshot.conformity] : snapshot.value;
   const parts = [main, snapshot.observacao ? `obs: ${snapshot.observacao}` : undefined].filter(Boolean);
   return parts.length > 0 ? parts.join(' · ') : NO_ANSWER_LABEL;
-}
-
-interface BuildRevisionInput {
-  id: string;
-  inspectionId: string;
-  itemId: string;
-  previous: Answer | undefined;
-  next: Answer;
-  autor: Pick<User, 'id' | 'nome'> | null;
-  em: string;
-}
-
-/** Cria a revisão só quando o conteúdo mudou — salvar igual não gera ruído no histórico. */
-export function buildRevision(input: BuildRevisionInput): AnswerRevision | undefined {
-  const anterior = toSnapshot(input.previous);
-  const novo = toSnapshot(input.next) ?? {};
-  if (sameSnapshot(anterior, novo)) return undefined;
-  const hadContent = anterior && Object.keys(anterior).length > 0;
-  return {
-    id: input.id,
-    inspectionId: input.inspectionId,
-    itemId: input.itemId,
-    autorNome: input.autor?.nome ?? 'Sistema',
-    autorId: input.autor?.id,
-    em: input.em,
-    anterior: hadContent ? anterior : undefined,
-    novo,
-  };
 }
 
 /** Revisões de um item, da mais recente para a mais antiga. */
