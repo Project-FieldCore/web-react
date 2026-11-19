@@ -25,10 +25,10 @@ npm ci
 npm run dev                        # http://localhost:3000
 ```
 
-- **A API precisa estar no ar** para login e cadastros: suba a [api-java](../api-java/README.md) (perfil `dev`,
+- **A API precisa estar no ar** para login e cadastros: suba a [api-java](https://github.com/Project-FieldCore/api-java#executar-dev) (perfil `dev`,
   `http://localhost:8080`) antes de abrir o painel.
 - Login com os usuários do seed da API (senha `DemoPass123!`, só para demo): `admin@fieldcore.com` (ADMIN),
-  `ana.silva@example.com` (SUPERVISOR). Lista completa em [DEMO_SEED.md](../api-java/docs/DEMO_SEED.md).
+  `ana.silva@example.com` (SUPERVISOR). Lista completa em [DEMO_SEED.md](https://github.com/Project-FieldCore/api-java/blob/develop/docs/DEMO_SEED.md).
 - Se a API estiver em outro host/porta, ajuste `NEXT_PUBLIC_API_BASE_URL` em `.env.local`.
 
 | Script | Função |
@@ -43,7 +43,7 @@ npm run dev                        # http://localhost:3000
 
 As telas com dados remotos tratam os estados **carregando**, **vazio**, **erro** e **sucesso**
 (doc. 14.15). Erros da API seguem o formato padronizado `ErrorResponse` (`code`, `message`, `fieldErrors`) descrito no
-[README da API](../api-java/README.md#formato-padronizado-de-erro).
+[README da API](https://github.com/Project-FieldCore/api-java#formato-padronizado-de-erro).
 
 ## Mocks OpenAPI (cadastros)
 
