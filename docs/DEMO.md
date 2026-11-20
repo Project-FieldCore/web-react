@@ -60,7 +60,7 @@ Detalhes e reset: [DEMO_SEED.md](https://github.com/Project-FieldCore/api-java/b
 4. **Esperado:** o status passa a *Em revisão* e aparecem as ações **Aprovar**, **Reprovar** e **Devolver para correção**.
 
 ### 3.4 Decisão
-- **Aprovar:** clique em **Aprovar** (comentário opcional). **Esperado:** volta para a *Fila de revisão* (ou *Inspeções*, se você abriu por lá) e o status fica *Aprovada*.
+- **Aprovar:** clique em **Aprovar** (comentário opcional). **Esperado:** volta para a *Fila de revisão* (ou *Inspeções*, se você abriu por lá) e o status fica *Aprovada* (selo verde).
 - **Reprovar:** clique em **Reprovar**, preencha o **Motivo da reprovação** (obrigatório) e confirme. Sem motivo, o formulário mostra erro.
 - **Devolver para correção:** informe o comentário; a inspeção volta ao técnico.
 
@@ -72,7 +72,7 @@ Para repetir a demo com outra decisão, use `[Demo] Em revisão` ou reinicie a A
 |--------|---------------|
 | **Carregando** | abrir *Fila de revisão* ou o detalhe da inspeção (indicador de carregamento) |
 | **Vazio** | depois de decidir todas as inspeções: "Nenhuma inspeção aguardando revisão" |
-| **Erro** | parar a API e recarregar a fila: mensagem de falha com **Tentar novamente**; entrar com `joao.tecnico@example.com` não abre o painel (perfil sem acesso) |
+| **Erro** | parar a API e recarregar a fila: mensagem de falha com **Tentar novamente**; entrar com `joao.tecnico@example.com` mostra "Este perfil não tem acesso à interface administrativa web."; senha errada mostra "E-mail ou senha inválidos." |
 | **Sucesso** | aprovar uma inspeção (retorna à lista com o novo status) |
 
 Erros da API chegam no formato padronizado (`code`, `message`, `fieldErrors`) — ver o
