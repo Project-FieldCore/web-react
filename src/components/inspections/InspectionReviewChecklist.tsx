@@ -11,6 +11,12 @@ import {
 } from '@/lib/inspections-api';
 import { formatChecklistAnswer } from '@/lib/inspection-checklist-display';
 import { evidencesForItem } from '@/lib/evidence-gallery';
+import { historyForItem } from '@/lib/answer-history-rules';
+import { fetchResponseHistory } from '@/lib/response-history-api';
+import { describeLoadError } from '@/lib/state-copy';
+import type { AnswerRevision } from '@/types';
+import { AnswerHistoryToggle } from './AnswerHistoryToggle';
+import type { AnswerHistoryStatus } from './AnswerHistory';
 import { EvidenceThumbnail } from './EvidenceThumbnail';
 import { useEvidenceViewer } from './EvidenceViewerContext';
 
@@ -57,11 +63,13 @@ function ChecklistItemCard({
   inspectionId,
   itemEvidences,
   onOpenEvidence,
+  history,
 }: {
   item: InspectionChecklistItem;
   inspectionId: string;
   itemEvidences: MonitoringEvidence[];
   onOpenEvidence?: (evidenceId: string) => void;
+  history: { revisions: AnswerRevision[]; status: AnswerHistoryStatus; error: string | null; onRetry: () => void };
 }) {
   const answer = formatChecklistAnswer(item);
   const observation = item.observation?.trim() ? item.observation.trim() : null;
@@ -119,6 +127,14 @@ function ChecklistItemCard({
         </div>
       ) : null}
 
+      <AnswerHistoryToggle
+        itemId={item.id}
+        revisions={historyForItem(history.revisions, item.id)}
+        status={history.status}
+        error={history.error}
+        onRetry={history.onRetry}
+      />
+
       {process.env.NODE_ENV === 'development' && (item.rulesJson || item.optionsJson) ? (
         <div className="mt-2 text-[10px] font-mono text-slate-400 break-all">
           {item.rulesJson ? `rulesJson: ${item.rulesJson}` : null}
@@ -142,7 +158,13 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
   const [canRetry, setCanRetry] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
 
+  const [revisions, setRevisions] = useState<AnswerRevision[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<AnswerHistoryStatus>('loading');
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyToken, setHistoryToken] = useState(0);
+
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
+  const reloadHistory = useCallback(() => setHistoryToken((n) => n + 1), []);
   const sortedEvidences = viewer?.status === 'ready' ? viewer.sortedEvidences : [];
   const openEvidence = viewer?.openEvidence;
 
@@ -168,6 +190,29 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
       active = false;
     };
   }, [inspectionId, reloadToken]);
+
+  // Histórico de respostas: falha aqui não bloqueia o checklist nem aprovar/reprovar.
+  useEffect(() => {
+    let active = true;
+    setHistoryStatus('loading');
+    setHistoryError(null);
+    void fetchResponseHistory(inspectionId)
+      .then((next) => {
+        if (!active) return;
+        setRevisions(next);
+        setHistoryStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setHistoryError(describeLoadError(error, 'Não foi possível carregar o histórico.').message);
+        setHistoryStatus('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [inspectionId, historyToken]);
+
+  const history = { revisions, status: historyStatus, error: historyError, onRetry: reloadHistory };
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-5" aria-busy={status === 'loading'}>
@@ -201,6 +246,7 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
                   inspectionId={inspectionId}
                   itemEvidences={evidencesForItem(sortedEvidences, item.id)}
                   onOpenEvidence={openEvidence}
+                  history={history}
                 />
               ))
             )}
