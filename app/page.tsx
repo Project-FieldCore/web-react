@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
 import { formatDateTime } from '@/lib/inspection-display';
+import { EmptyState, ErrorState, LoadingState } from '@/components/States';
+import { useDashboardIndicators, type DashboardIndicatorsState } from '@/hooks/useDashboardIndicators';
 import type { Criticidade, InspectionStatus } from '@/types';
 
 const ACTIVE_STATUSES: InspectionStatus[] = ['ATRIBUIDA', 'EM_ANDAMENTO'];
@@ -110,11 +112,15 @@ export default function DashboardPage() {
   const models = useAppStore((s) => s.models);
   const auditEvents = useAppStore((s) => s.auditEvents);
 
-  const aguardandoRevisao = inspections.filter((i) => i.status === 'ENVIADA' || i.status === 'EM_REVISAO').length;
-  const emAndamento = inspections.filter((i) => i.status === 'EM_ANDAMENTO').length;
-  const aprovadas = inspections.filter((i) => i.status === 'APROVADA').length;
-  const reprovadas = inspections.filter((i) => i.status === 'REPROVADA').length;
-  const totalInspections = inspections.length || 1;
+  // Indicadores por estado e criticidade vêm da API (GET /dashboard/indicators), não do estado local.
+  const indicators = useDashboardIndicators();
+  const ind = indicators.status === 'ready' ? indicators.data : null;
+  const countOf = (status: InspectionStatus) => ind?.inspectionsByStatus[status] ?? 0;
+  const aguardandoRevisao = countOf('ENVIADA') + countOf('EM_REVISAO');
+  const emAndamento = countOf('EM_ANDAMENTO');
+  const aprovadas = countOf('APROVADA');
+  const reprovadas = countOf('REPROVADA');
+  const totalInspections = ind?.totalInspections || 1;
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.nome ?? '—';
   const techName = (id: string) => technicians.find((t) => t.id === id)?.nome ?? '—';
@@ -126,15 +132,16 @@ export default function DashboardPage() {
     .sort((a, b) => b.count - a.count);
   const maxWorkload = Math.max(1, ...techWorkload.map((t) => t.count));
 
-  const funil = STATUS_ORDER.map((status) => ({
+  // Só os estados que a API informa ("Devolvida" não existe nela e não é exibida como 0).
+  const funil = STATUS_ORDER.filter((status) => ind && status in ind.inspectionsByStatus).map((status) => ({
     status,
-    count: inspections.filter((i) => i.status === status).length,
+    count: countOf(status),
   }));
   const maxFunil = Math.max(1, ...funil.map((f) => f.count));
 
-  const nonConformities = inspections.flatMap((i) => Object.values(i.nonConformities));
-  const ncByCriticidade = CRITICIDADE_ORDER.map((c) => ({ criticidade: c, count: nonConformities.filter((nc) => nc.criticidade === c).length }));
-  const totalNC = nonConformities.length || 1;
+  const ncByCriticidade = CRITICIDADE_ORDER.map((c) => ({ criticidade: c, count: ind?.openNonConformitiesBySeverity[c] ?? 0 }));
+  const totalOpenNC = ind?.totalOpenNonConformities ?? 0;
+  const totalNC = totalOpenNC || 1;
 
   // RN-039/054: taxa de conformidade sobre respostas do tipo conforme/não conforme (ignora N/A e outros tipos de item).
   let conforme = 0;
@@ -169,7 +176,9 @@ export default function DashboardPage() {
               {greeting()}{currentUser ? `, ${currentUser.nome.split(' ')[0]}` : ''}.
             </h1>
             <p className="text-slate-300 text-sm mt-1.5 max-w-lg">
-              {aguardandoRevisao > 0
+              {!ind
+                ? 'Carregando indicadores...'
+                : aguardandoRevisao > 0
                 ? `${aguardandoRevisao} ${aguardandoRevisao === 1 ? 'inspeção' : 'inspeções'} aguardando sua revisão e ${emAndamento} em andamento em campo.`
                 : `Nenhuma inspeção aguardando revisão agora — ${emAndamento} em andamento em campo.`}
             </p>
@@ -189,11 +198,15 @@ export default function DashboardPage() {
       </div>
 
       {/* KPIs — valor + participação real no total de inspeções (sem métricas inventadas) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiTile href="/inspections/review-queue" label="Aguardando revisão" value={aguardandoRevisao} total={totalInspections} tone="blue" icon={<IconInbox />} />
-        <KpiTile label="Em andamento" value={emAndamento} total={totalInspections} tone="amber" icon={<IconClock />} />
-        <KpiTile label="Aprovadas" value={aprovadas} total={totalInspections} tone="emerald" icon={<IconCheck />} />
-        <KpiTile label="Reprovadas" value={reprovadas} total={totalInspections} tone="red" icon={<IconX />} />
+      <div className="mb-6">
+        <IndicatorsBoundary state={indicators}>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KpiTile href="/inspections/review-queue" label="Aguardando revisão" value={aguardandoRevisao} total={totalInspections} tone="blue" icon={<IconInbox />} />
+            <KpiTile label="Em andamento" value={emAndamento} total={totalInspections} tone="amber" icon={<IconClock />} />
+            <KpiTile label="Aprovadas" value={aprovadas} total={totalInspections} tone="emerald" icon={<IconCheck />} />
+            <KpiTile label="Reprovadas" value={reprovadas} total={totalInspections} tone="red" icon={<IconX />} />
+          </div>
+        </IndicatorsBoundary>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 items-start">
@@ -204,31 +217,37 @@ export default function DashboardPage() {
               <IconFunnel />
               <h2 className="font-bold text-navy-900">Funil de inspeções</h2>
             </div>
-            <div className="space-y-2.5">
-              {funil.map((f) => (
-                <div key={f.status} className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
-                  {/* sm:contents "dissolve" este div no flex do pai — label, barra e contador viram uma
-                      única linha a partir do sm; abaixo disso, o rótulo (que pode ser longo, ex.
-                      "Aguardando revisão") fica em cima, com o contador ao lado, sem truncar. */}
-                  <div className="flex items-center justify-between sm:contents">
-                    <span className="sm:w-[120px] sm:shrink-0 text-xs font-semibold text-slate-500">{STATUS_LABEL[f.status]}</span>
-                    <span className="sm:hidden text-xs font-bold text-navy-900">{f.count}</span>
-                  </div>
-                  {/* w-full (não flex-1) no mobile: dentro de um flex-col com altura automática,
-                      flex-1 (flex-basis:0 + grow) não tem espaço "extra" pra crescer e a barra
-                      colapsa para 0px de altura. sm:flex-1 assume só quando o layout já é flex-row. */}
-                  <div className="w-full sm:flex-1 h-3 sm:h-3.5 rounded-full bg-slate-100 overflow-hidden">
-                    {f.count > 0 && (
-                      <div
-                        className={`h-full rounded-full ${STATUS_BAR[f.status]} transition-all duration-500`}
-                        style={{ width: `${Math.max((f.count / maxFunil) * 100, 6)}%` }}
-                      />
-                    )}
-                  </div>
-                  <span className="hidden sm:block w-5 shrink-0 text-right text-xs font-bold text-navy-900">{f.count}</span>
+            <IndicatorsBoundary state={indicators}>
+              {ind && ind.totalInspections === 0 ? (
+                <EmptyState title="Nenhuma inspeção registrada" description="Agende uma inspeção para ver o funil." />
+              ) : (
+                <div className="space-y-2.5">
+                  {funil.map((f) => (
+                    <div key={f.status} className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
+                      {/* sm:contents "dissolve" este div no flex do pai — label, barra e contador viram uma
+                          única linha a partir do sm; abaixo disso, o rótulo (que pode ser longo, ex.
+                          "Aguardando revisão") fica em cima, com o contador ao lado, sem truncar. */}
+                      <div className="flex items-center justify-between sm:contents">
+                        <span className="sm:w-[120px] sm:shrink-0 text-xs font-semibold text-slate-500">{STATUS_LABEL[f.status]}</span>
+                        <span className="sm:hidden text-xs font-bold text-navy-900">{f.count}</span>
+                      </div>
+                      {/* w-full (não flex-1) no mobile: dentro de um flex-col com altura automática,
+                          flex-1 (flex-basis:0 + grow) não tem espaço "extra" pra crescer e a barra
+                          colapsa para 0px de altura. sm:flex-1 assume só quando o layout já é flex-row. */}
+                      <div className="w-full sm:flex-1 h-3 sm:h-3.5 rounded-full bg-slate-100 overflow-hidden">
+                        {f.count > 0 && (
+                          <div
+                            className={`h-full rounded-full ${STATUS_BAR[f.status]} transition-all duration-500`}
+                            style={{ width: `${Math.max((f.count / maxFunil) * 100, 6)}%` }}
+                          />
+                        )}
+                      </div>
+                      <span className="hidden sm:block w-5 shrink-0 text-right text-xs font-bold text-navy-900">{f.count}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </IndicatorsBoundary>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -383,9 +402,10 @@ export default function DashboardPage() {
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <h2 className="text-xs font-bold text-navy-700 uppercase mb-3.5">Não conformidades por criticidade</h2>
-            {nonConformities.length === 0 ? (
-              <p className="text-sm text-slate-400">Nenhuma registrada.</p>
+            <h2 className="text-xs font-bold text-navy-700 uppercase mb-3.5">Não conformidades abertas por criticidade</h2>
+            <IndicatorsBoundary state={indicators}>
+            {totalOpenNC === 0 ? (
+              <p className="text-sm text-slate-400">Nenhuma não conformidade aberta.</p>
             ) : (
               <>
                 <div className="flex h-3.5 rounded-full overflow-hidden gap-0.5 mb-3.5">
@@ -411,6 +431,7 @@ export default function DashboardPage() {
                 </ul>
               </>
             )}
+            </IndicatorsBoundary>
           </div>
 
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
@@ -475,6 +496,15 @@ const TONE_CLASSES = {
   emerald: { bg: 'bg-emerald-50', text: 'text-emerald-700', bar: 'bg-emerald-500' },
   red: { bg: 'bg-red-50', text: 'text-red-700', bar: 'bg-red-500' },
 } as const;
+
+/** Loading / erro (com retry) / conteúdo dos indicadores da API. */
+function IndicatorsBoundary({ state, children }: { state: DashboardIndicatorsState; children: React.ReactNode }) {
+  if (state.status === 'loading') return <LoadingState label="Carregando indicadores..." />;
+  if (state.status === 'error') {
+    return <ErrorState title={state.error.title} message={state.error.message} onRetry={state.error.retry ? state.reload : undefined} />;
+  }
+  return <>{children}</>;
+}
 
 function KpiTile({
   label,
