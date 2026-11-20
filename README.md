@@ -45,6 +45,10 @@ As telas com dados remotos tratam os estados **carregando**, **vazio**, **erro**
 (doc. 14.15). Erros da API seguem o formato padronizado `ErrorResponse` (`code`, `message`, `fieldErrors`) descrito no
 [README da API](https://github.com/Project-FieldCore/api-java#formato-padronizado-de-erro).
 
+## Demo ponta a ponta
+
+Roteiro login → fila de revisão → decisão com os dados de teste da API: [docs/DEMO.md](docs/DEMO.md).
+
 ## Mocks OpenAPI (cadastros)
 
 Cadastros de seed (`users` / `clients` / `sites` / `equipment`) vêm de
