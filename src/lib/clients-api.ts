@@ -1,5 +1,5 @@
 import { http } from './http';
-import { buildQueryString, fetchAllPages, listParams, type ListQuery, type Paged } from './paged-list';
+import { buildQueryString, fetchAllPages, sortAndSearchParams, type ListQuery, type Paged } from './paged-list';
 import type { Client } from '@/types';
 
 /**
@@ -43,14 +43,19 @@ export interface ClientFilters {
   ativo?: boolean;
 }
 
+/** Busca, ordenação e filtro da listagem em parâmetros da API (a exportação CSV usa os mesmos). */
+export function clientsFilterParams(query: Pick<ListQuery<ClientFilters>, 'sort' | 'q' | 'filters'>) {
+  const { ativo } = query.filters;
+  return {
+    ...sortAndSearchParams(query),
+    status: ativo === undefined ? undefined : ativo ? 'ACTIVE' : 'INACTIVE',
+  };
+}
+
 /** Uma página da listagem, com busca, filtro e ordenação feitos na API. */
 export async function searchClients(query: ListQuery<ClientFilters>): Promise<Paged<Client>> {
-  const { ativo } = query.filters;
   const response = await http.get<ApiClientPage>(
-    `/clients${buildQueryString({
-      ...listParams(query),
-      status: ativo === undefined ? undefined : ativo ? 'ACTIVE' : 'INACTIVE',
-    })}`
+    `/clients${buildQueryString({ page: query.page, size: query.size, ...clientsFilterParams(query) })}`
   );
   return { items: response.items.map(toClient), page: response.page };
 }

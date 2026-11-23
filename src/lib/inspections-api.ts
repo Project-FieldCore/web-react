@@ -1,5 +1,5 @@
 import { http } from './http';
-import { buildQueryString, listParams, type ListQuery, type Paged } from './paged-list';
+import { buildQueryString, listParams, sortAndSearchParams, type ListQuery, type Paged } from './paged-list';
 import type { Cancellation, Inspection, InspectionStatus, NonConformityStatus, Priority } from '@/types';
 
 /**
@@ -174,16 +174,21 @@ export interface InspectionListFilters {
   scheduledTo?: string;
 }
 
-/** Listagem administrativa paginada (`GET /inspections`). */
-export async function listInspections(query: ListQuery<InspectionListFilters>): Promise<Paged<Inspection>> {
-  const path = `/inspections${buildQueryString({
-    ...listParams(query),
+/** Ordenação e filtros da listagem em parâmetros da API (a exportação CSV usa os mesmos). */
+export function inspectionsFilterParams(query: Pick<ListQuery<InspectionListFilters>, 'sort' | 'q' | 'filters'>) {
+  return {
+    ...sortAndSearchParams(query),
     status: query.filters.status,
     technicianId: query.filters.technicianId,
     clientId: query.filters.clientId,
     scheduledFrom: query.filters.scheduledFrom,
     scheduledTo: query.filters.scheduledTo,
-  })}`;
+  };
+}
+
+/** Listagem administrativa paginada (`GET /inspections`). */
+export async function listInspections(query: ListQuery<InspectionListFilters>): Promise<Paged<Inspection>> {
+  const path = `/inspections${buildQueryString({ page: query.page, size: query.size, ...inspectionsFilterParams(query) })}`;
   const page = await http.get<{ items: ApiInspection[]; page: Paged<Inspection>['page'] }>(path);
   return {
     items: page.items.map((item) => toInspection(item, { modeloId: item.templateVersionId, modeloVersao: 0 })),
