@@ -231,7 +231,7 @@ export default function InspectionReviewPage() {
         </div>
       )}
 
-      <InspectionReviewChecklist inspectionId={inspection.id} />
+      <InspectionReviewChecklist inspectionId={inspection.id} canComment={canReview} />
 
       {canReview && !showRejectForm && !showReturnForm && (
         <>

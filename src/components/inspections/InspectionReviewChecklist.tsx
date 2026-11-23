@@ -14,8 +14,16 @@ import { evidencesForItem } from '@/lib/evidence-gallery';
 import { historyForItem } from '@/lib/answer-history-rules';
 import { fetchResponseHistory } from '@/lib/response-history-api';
 import { describeLoadError } from '@/lib/state-copy';
+import {
+  addItemReviewComment,
+  commentsForItem,
+  describeCommentError,
+  fetchItemReviewComments,
+  type ItemReviewComment,
+} from '@/lib/item-review-comments-api';
 import type { AnswerRevision } from '@/types';
 import { AnswerHistoryToggle } from './AnswerHistoryToggle';
+import { ItemReviewComments, type CommentSubmitResult, type ItemCommentsStatus } from './ItemReviewComments';
 import type { AnswerHistoryStatus } from './AnswerHistory';
 import { EvidenceThumbnail } from './EvidenceThumbnail';
 import { useEvidenceViewer } from './EvidenceViewerContext';
@@ -64,12 +72,21 @@ function ChecklistItemCard({
   itemEvidences,
   onOpenEvidence,
   history,
+  comments,
 }: {
   item: InspectionChecklistItem;
   inspectionId: string;
   itemEvidences: MonitoringEvidence[];
   onOpenEvidence?: (evidenceId: string) => void;
   history: { revisions: AnswerRevision[]; status: AnswerHistoryStatus; error: string | null; onRetry: () => void };
+  comments: {
+    items: ItemReviewComment[];
+    status: ItemCommentsStatus;
+    error: string | null;
+    onRetry: () => void;
+    canComment: boolean;
+    onSubmit: (itemId: string, text: string) => Promise<CommentSubmitResult>;
+  };
 }) {
   const answer = formatChecklistAnswer(item);
   const observation = item.observation?.trim() ? item.observation.trim() : null;
@@ -135,6 +152,16 @@ function ChecklistItemCard({
         onRetry={history.onRetry}
       />
 
+      <ItemReviewComments
+        itemId={item.id}
+        comments={commentsForItem(comments.items, item.id)}
+        status={comments.status}
+        error={comments.error}
+        onRetry={comments.onRetry}
+        canComment={comments.canComment}
+        onSubmit={(text) => comments.onSubmit(item.id, text)}
+      />
+
       {process.env.NODE_ENV === 'development' && (item.rulesJson || item.optionsJson) ? (
         <div className="mt-2 text-[10px] font-mono text-slate-400 break-all">
           {item.rulesJson ? `rulesJson: ${item.rulesJson}` : null}
@@ -149,7 +176,14 @@ function ChecklistItemCard({
  * Bloco “Respostas do checklist” — GET /inspections/{id}/checklist (somente leitura, RN-084).
  * Falhas aqui não bloqueiam aprovar/reprovar na página.
  */
-export function InspectionReviewChecklist({ inspectionId }: { inspectionId: string }) {
+export function InspectionReviewChecklist({
+  inspectionId,
+  canComment = false,
+}: {
+  inspectionId: string;
+  /** Comentar por item só é permitido com a inspeção em revisão (a API recusa o resto com 409). */
+  canComment?: boolean;
+}) {
   const viewer = useEvidenceViewer();
   const [sections, setSections] = useState<InspectionChecklistSection[]>([]);
   const [status, setStatus] = useState<ChecklistStatus>('loading');
@@ -163,7 +197,13 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyToken, setHistoryToken] = useState(0);
 
+  const [comments, setComments] = useState<ItemReviewComment[]>([]);
+  const [commentsStatus, setCommentsStatus] = useState<ItemCommentsStatus>('loading');
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentsToken, setCommentsToken] = useState(0);
+
   const reload = useCallback(() => setReloadToken((n) => n + 1), []);
+  const reloadComments = useCallback(() => setCommentsToken((n) => n + 1), []);
   const reloadHistory = useCallback(() => setHistoryToken((n) => n + 1), []);
   const sortedEvidences = viewer?.status === 'ready' ? viewer.sortedEvidences : [];
   const openEvidence = viewer?.openEvidence;
@@ -212,6 +252,49 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
     };
   }, [inspectionId, historyToken]);
 
+  // Comentários de revisão: falha aqui não bloqueia o checklist nem aprovar/reprovar.
+  useEffect(() => {
+    let active = true;
+    setCommentsStatus('loading');
+    setCommentsError(null);
+    void fetchItemReviewComments(inspectionId)
+      .then((next) => {
+        if (!active) return;
+        setComments(next);
+        setCommentsStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setCommentsError(describeCommentError(error).message);
+        setCommentsStatus('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [inspectionId, commentsToken]);
+
+  const submitComment = useCallback(
+    async (itemId: string, text: string): Promise<CommentSubmitResult> => {
+      try {
+        const created = await addItemReviewComment(inspectionId, itemId, text);
+        setComments((prev) => [...prev, created]);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: describeCommentError(error).message };
+      }
+    },
+    [inspectionId]
+  );
+
+  const commentsProps = {
+    items: comments,
+    status: commentsStatus,
+    error: commentsError,
+    onRetry: reloadComments,
+    canComment,
+    onSubmit: submitComment,
+  };
+
   const history = { revisions, status: historyStatus, error: historyError, onRetry: reloadHistory };
 
   return (
@@ -247,6 +330,7 @@ export function InspectionReviewChecklist({ inspectionId }: { inspectionId: stri
                   itemEvidences={evidencesForItem(sortedEvidences, item.id)}
                   onOpenEvidence={openEvidence}
                   history={history}
+                  comments={commentsProps}
                 />
               ))
             )}
