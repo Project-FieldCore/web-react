@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import type { UserRole } from '@/types';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 const IconDashboard = () => (
   <svg className="w-[18px] h-[18px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -176,6 +177,9 @@ function UserFooter() {
       <div className="text-xs text-slate-500 mb-1">Logado como</div>
       <div className="text-sm font-semibold text-white truncate">{currentUser.nome}</div>
       <div className="text-xs text-slate-400 mb-2.5">{ROLE_LABEL[currentUser.role]}</div>
+      <div className="mb-3">
+        <ThemeToggle />
+      </div>
       <button
         onClick={handleLogout}
         className="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"

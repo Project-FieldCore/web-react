@@ -27,3 +27,126 @@ html, body {
 .animate-fade-in-up {
   animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* ==========================================================================
+   Tema escuro (PBI-0081.2)
+   --------------------------------------------------------------------------
+   As telas usam classes fixas do Tailwind (bg-white, text-slate-*, text-navy-900...).
+   Em vez de duplicar `dark:` em cada uma, o tema escuro remapeia aqui essas
+   mesmas classes por propriedade — por isso `text-navy-900` (texto) muda e
+   `bg-navy-900` (menu lateral, botões) não. Tudo fica escopado em `.dark`
+   (classe do <html>, aplicada por THEME_INIT_SCRIPT / useTheme) e só em tela:
+   a impressão do relatório continua clara. Código novo pode usar `dark:` direto.
+   ========================================================================== */
+@media screen {
+  .dark {
+    --bg: #0a1424;
+    --surface: #111e33;
+    --surface-2: #16263f;
+    --surface-3: #1f3250;
+    --border: #2a3d5c;
+    --border-soft: #1e2f4a;
+    --text: #e8eef8;
+    --text-2: #c9d4e5;
+    --text-3: #a3b2c9;
+    --text-4: #8392ac;
+    --accent: #8fbceb;
+    --brand: #6cc55a;
+  }
+
+  .dark,
+  .dark body {
+    background-color: var(--bg);
+    color: var(--text);
+  }
+
+  /* Superfícies */
+  .dark .bg-white { background-color: var(--surface); }
+  .dark .bg-slate-50,
+  .dark .bg-slate-100 { background-color: var(--surface-2); }
+  .dark .bg-slate-50\/60 { background-color: rgb(255 255 255 / 0.03); }
+  .dark .bg-slate-200 { background-color: var(--surface-3); }
+  .dark .bg-slate-300 { background-color: #3a4d6b; }
+  .dark .bg-\[\#F2F6F8\] { background-color: var(--bg); }
+  .dark .hover\:bg-slate-50:hover { background-color: var(--surface-2); }
+  .dark .disabled\:bg-slate-50:disabled { background-color: var(--surface-2); }
+  .dark .disabled\:bg-slate-200:disabled { background-color: var(--surface-3); }
+
+  /* Fundos de destaque (selos, avisos, cartões de KPI): tons translúcidos sobre qualquer superfície */
+  .dark .bg-red-50 { background-color: rgb(248 113 113 / 0.12); }
+  .dark .bg-red-100 { background-color: rgb(248 113 113 / 0.2); }
+  .dark .hover\:bg-red-50:hover { background-color: rgb(248 113 113 / 0.18); }
+  .dark .bg-emerald-50 { background-color: rgb(52 211 153 / 0.12); }
+  .dark .bg-emerald-100 { background-color: rgb(52 211 153 / 0.2); }
+  .dark .bg-amber-50 { background-color: rgb(251 191 36 / 0.12); }
+  .dark .bg-amber-100 { background-color: rgb(251 191 36 / 0.2); }
+  .dark .hover\:bg-amber-100:hover { background-color: rgb(251 191 36 / 0.28); }
+  .dark .bg-orange-50 { background-color: rgb(251 146 60 / 0.12); }
+  .dark .bg-orange-100 { background-color: rgb(251 146 60 / 0.2); }
+  .dark .bg-blue-50 { background-color: rgb(96 165 250 / 0.12); }
+  .dark .bg-blue-100 { background-color: rgb(96 165 250 / 0.2); }
+  .dark .bg-sky-50 { background-color: rgb(56 189 248 / 0.12); }
+
+  /* Texto */
+  .dark .text-slate-900,
+  .dark .text-navy-900,
+  .dark .text-navy-800,
+  .dark .hover\:text-navy-900:hover { color: var(--text); }
+  .dark .text-slate-700,
+  .dark .text-slate-600 { color: var(--text-2); }
+  .dark .text-slate-500 { color: var(--text-3); }
+  .dark .text-slate-400,
+  .dark .disabled\:text-slate-400:disabled,
+  .dark .disabled\:text-slate-500:disabled { color: var(--text-4); }
+  .dark .text-navy-700,
+  .dark .hover\:text-navy-700:hover { color: var(--accent); }
+  .dark .text-brandgreen-600,
+  .dark .text-brandgreen-700,
+  .dark .hover\:text-brandgreen-700:hover,
+  .dark .hover\:text-brandgreen-800:hover { color: var(--brand); }
+  .dark .text-red-500,
+  .dark .text-red-600 { color: #f87171; }
+  .dark .text-red-700,
+  .dark .text-red-800 { color: #fca5a5; }
+  .dark .text-emerald-600 { color: #34d399; }
+  .dark .text-emerald-700,
+  .dark .text-emerald-800 { color: #6ee7b7; }
+  .dark .text-amber-700,
+  .dark .text-amber-800,
+  .dark .text-amber-900 { color: #fcd34d; }
+  .dark .text-orange-500,
+  .dark .text-orange-600,
+  .dark .text-orange-700,
+  .dark .text-orange-800 { color: #fdba74; }
+  .dark .text-blue-700,
+  .dark .text-blue-800 { color: #93c5fd; }
+  .dark .text-sky-800 { color: #7dd3fc; }
+
+  /* Bordas */
+  .dark .border-slate-50,
+  .dark .border-slate-100 { border-color: var(--border-soft); }
+  .dark .border-slate-200,
+  .dark .border-slate-300 { border-color: var(--border); }
+  .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-soft); }
+  .dark .border-red-200 { border-color: rgb(248 113 113 / 0.35); }
+  .dark .border-emerald-200 { border-color: rgb(52 211 153 / 0.35); }
+  .dark .border-amber-200,
+  .dark .border-amber-300 { border-color: rgb(251 191 36 / 0.35); }
+  .dark .border-orange-200 { border-color: rgb(251 146 60 / 0.35); }
+  .dark .border-blue-100 { border-color: rgb(96 165 250 / 0.3); }
+  .dark .border-sky-200 { border-color: rgb(56 189 248 / 0.35); }
+  .dark .border-t-navy-700 { border-top-color: var(--accent); }
+
+  /* Foco visível no escuro */
+  .dark .focus\:border-navy-700:focus,
+  .dark .hover\:border-navy-700:hover { border-color: var(--accent); }
+  .dark .ring-navy-700 { --tw-ring-color: var(--accent); }
+
+  /* Campos de formulário: sem classe de fundo própria, herdariam o branco do navegador */
+  .dark :where(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
+    background-color: var(--surface);
+    color: var(--text);
+  }
+  .dark .input { border-color: var(--border); }
+  .dark ::placeholder { color: var(--text-4); opacity: 1; }
+}
