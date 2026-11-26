@@ -895,7 +895,40 @@ export const useAppStore = create<AppState>()(
           category: model.category,
           description: model.description,
         }, model.lockVersion);
-        set((s) => ({ models: s.models.map((current) => current.id === modelId ? { ...saved, sections: current.sections } : current) }));
+
+        // A edição da estrutura é incremental na API. Porém, uma seção/item pode
+        // ter sido criado enquanto a versão draft ainda não estava hidratada (por
+        // exemplo, logo após criar o modelo). Nesse caso ele tem um id local e
+        // antes era perdido no refresh: este "salvar" reconcilia a estrutura com
+        // a versão draft retornada pelo servidor.
+        if (!saved.draftVersionId) {
+          return { ok: false, error: 'A API não retornou uma versão de rascunho para salvar a estrutura do modelo.' };
+        }
+
+        const sections = [] as ModelSection[];
+        for (const localSection of normalizeSectionOrder(model.sections)) {
+          const section = isApiUuid(localSection.id)
+            ? localSection
+            : await sectionsApi.createSection(saved.draftVersionId, {
+                title: localSection.title.trim() || 'Nova seção',
+                description: localSection.description,
+                displayOrder: localSection.displayOrder,
+              });
+
+          const items = [] as ModelItem[];
+          for (const localItem of localSection.items) {
+            if (isApiUuid(localItem.id) && section.id === localSection.id) {
+              items.push(localItem);
+              continue;
+            }
+            items.push(await itemsApi.createItem(section.id, localItem, items.length));
+          }
+          sections.push({ ...section, items });
+        }
+
+        set((s) => ({
+          models: s.models.map((current) => current.id === modelId ? { ...saved, sections } : current),
+        }));
       } catch (error) {
         return toErrorResult(error, 'Não foi possível salvar o modelo. Tente novamente.');
       }
