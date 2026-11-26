@@ -6,6 +6,8 @@ interface ApiProfile {
   name: string;
   email: string;
   role: UserRole;
+  /** true no primeiro acesso (usuário criado por um administrador com senha provisória). */
+  mustChangePassword?: boolean;
 }
 
 /** Contrato real da API (openapi/fieldops-v1.yaml, TokenResponse). */
@@ -21,6 +23,8 @@ export interface LoginResponse {
   token: string;
   refreshToken: string;
   user: User;
+  /** Primeiro acesso: a sessão só serve para chamar changePassword até a senha ser redefinida. */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -33,6 +37,7 @@ function toLoginResponse(response: TokenResponse): LoginResponse {
   return {
     token: response.accessToken,
     refreshToken: response.refreshToken,
+    mustChangePassword: response.user.mustChangePassword === true,
     user: {
       id: response.user.id,
       nome: response.user.name,
@@ -66,4 +71,16 @@ export async function refresh(refreshToken: string): Promise<LoginResponse> {
  */
 export function logout(refreshToken: string): Promise<void> {
   return http.post<void>('/auth/logout', { refreshToken }, { skipRefresh: true });
+}
+
+/**
+ * POST /v1/auth/change-password { currentPassword, newPassword } -> 200 TokenResponse
+ *   | 400 PASSWORD_UNCHANGED/VALIDATION_ERROR | 401 INVALID_CREDENTIALS
+ * Usado no primeiro acesso. A API revoga as sessões anteriores e devolve uma sessão
+ * nova, já liberada (mustChangePassword = false).
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<LoginResponse> {
+  return toLoginResponse(
+    await http.post<TokenResponse>('/auth/change-password', { currentPassword, newPassword }, { skipRefresh: true })
+  );
 }

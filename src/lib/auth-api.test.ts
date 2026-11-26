@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { login, logout, refresh } from './auth-api';
+import { changePassword, login, logout, refresh } from './auth-api';
 import { setAuthToken } from './auth-token';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -41,8 +41,46 @@ describe('auth-api login', () => {
     expect(result).toEqual({
       token: 'jwt-abc',
       refreshToken: 'refresh-xyz',
+      mustChangePassword: false,
       user: { id: 'usr-1', nome: 'Admin', email: 'admin@fieldcore.com', role: 'ADMIN', status: 'ATIVO' },
     });
+  });
+
+  it('sinaliza o primeiro acesso quando a API devolve mustChangePassword', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        accessToken: 'jwt-prov',
+        refreshToken: 'refresh-prov',
+        expiresIn: 900,
+        user: { id: 'usr-2', name: 'Novo', email: 'novo@fieldcore.com', role: 'SUPERVISOR', mustChangePassword: true },
+      })
+    );
+
+    const result = await login('novo@fieldcore.com', 'provisoria-123');
+
+    expect(result.mustChangePassword).toBe(true);
+  });
+
+  it('changePassword envia senha atual e nova para /auth/change-password com o access token', async () => {
+    setAuthToken('jwt-prov');
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        accessToken: 'jwt-novo',
+        refreshToken: 'refresh-novo',
+        expiresIn: 900,
+        user: { id: 'usr-2', name: 'Novo', email: 'novo@fieldcore.com', role: 'SUPERVISOR', mustChangePassword: false },
+      })
+    );
+    global.fetch = fetchMock;
+
+    const result = await changePassword('provisoria-123', 'nova-senha-123');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/auth\/change-password$/);
+    expect(init.headers.Authorization).toBe('Bearer jwt-prov');
+    expect(JSON.parse(init.body)).toEqual({ currentPassword: 'provisoria-123', newPassword: 'nova-senha-123' });
+    expect(result.token).toBe('jwt-novo');
+    expect(result.mustChangePassword).toBe(false);
   });
 
   it('logout envia o refreshToken com o access token e aceita resposta 200 sem corpo', async () => {

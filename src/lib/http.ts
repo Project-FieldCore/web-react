@@ -56,6 +56,8 @@ interface ParsedError {
 /** Mensagens em português para os códigos conhecidos da API (ErrorResponse.code). */
 const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   INVALID_CREDENTIALS: 'E-mail ou senha inválidos.',
+  PASSWORD_UNCHANGED: 'A nova senha precisa ser diferente da senha atual.',
+  PASSWORD_CHANGE_REQUIRED: 'Você precisa redefinir sua senha antes de usar o sistema.',
   ACCOUNT_INACTIVE: 'Este usuário está inativo ou bloqueado. Procure um administrador.',
   EMAIL_ALREADY_EXISTS: 'Já existe um usuário com esse e-mail.',
   VERSION_CONFLICT: 'Este registro foi alterado por outra pessoa. Os dados foram recarregados — tente de novo.',

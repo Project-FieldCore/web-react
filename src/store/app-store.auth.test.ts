@@ -6,14 +6,15 @@ import type { User } from '@/types';
 
 vi.mock('@/lib/auth-api', () => ({
   login: vi.fn(),
+  changePassword: vi.fn(),
   logout: vi.fn(),
 }));
 
-import { login as apiLoginMock, logout as apiLogoutMock } from '@/lib/auth-api';
+import { changePassword as apiChangePasswordMock, login as apiLoginMock, logout as apiLogoutMock } from '@/lib/auth-api';
 
 const ADMIN_USER: User = { id: 'usr-1', nome: 'Admin', email: 'admin@fieldcore.com', role: 'ADMIN', status: 'ATIVO' };
 
-function mockApiLogin(result: { token: string; refreshToken?: string; user: User } | Error) {
+function mockApiLogin(result: { token: string; refreshToken?: string; user: User; mustChangePassword?: boolean } | Error) {
   if (result instanceof Error) {
     (apiLoginMock as ReturnType<typeof vi.fn>).mockRejectedValue(result);
   } else {
@@ -181,6 +182,55 @@ describe('useAppStore auth', () => {
 
     it('também retorna ok para e-mail inexistente (sem enumeração)', () => {
       expect(useAppStore.getState().resetPassword('naoexiste@fieldcore.com', 'novaSenha99')).toEqual({ ok: true });
+    });
+  });
+
+  describe('primeiro acesso', () => {
+    it('não abre a sessão quando a API exige a troca de senha', async () => {
+      mockApiLogin({ token: 'jwt-provisorio', refreshToken: 'refresh-prov', user: ADMIN_USER, mustChangePassword: true });
+
+      const result = await useAppStore.getState().login('admin@fieldcore.com', 'provisoria-123');
+
+      expect(result).toEqual({ ok: true, mustChangePassword: true });
+      expect(useAppStore.getState().currentUser).toBeNull();
+      // Os tokens ficam guardados só para a chamada de troca de senha.
+      expect(getAuthToken()).toBe('jwt-provisorio');
+    });
+
+    it('abre a sessão com os tokens novos depois de redefinir a senha', async () => {
+      (apiChangePasswordMock as ReturnType<typeof vi.fn>).mockResolvedValue({
+        token: 'jwt-novo',
+        refreshToken: 'refresh-novo',
+        user: ADMIN_USER,
+        mustChangePassword: false,
+      });
+
+      const result = await useAppStore.getState().completeFirstAccess('provisoria-123', 'nova-senha-123');
+
+      expect(apiChangePasswordMock).toHaveBeenCalledWith('provisoria-123', 'nova-senha-123');
+      expect(result).toEqual({ ok: true });
+      expect(useAppStore.getState().currentUser).toEqual(ADMIN_USER);
+      expect(getAuthToken()).toBe('jwt-novo');
+      expect(getRefreshToken()).toBe('refresh-novo');
+    });
+
+    it('recusa senha curta sem chamar a API', async () => {
+      const result = await useAppStore.getState().completeFirstAccess('provisoria-123', 'curta');
+
+      expect(result.ok).toBe(false);
+      expect(apiChangePasswordMock).not.toHaveBeenCalled();
+      expect(useAppStore.getState().currentUser).toBeNull();
+    });
+
+    it('mantém o usuário fora do sistema quando a API recusa a troca', async () => {
+      (apiChangePasswordMock as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new ApiError('A nova senha precisa ser diferente da senha atual.', 400, undefined, 'PASSWORD_UNCHANGED')
+      );
+
+      const result = await useAppStore.getState().completeFirstAccess('provisoria-123', 'nova-senha-123');
+
+      expect(result.ok).toBe(false);
+      expect(useAppStore.getState().currentUser).toBeNull();
     });
   });
 });

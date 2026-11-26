@@ -33,7 +33,12 @@ import {
   MOCK_MODELS,
   MOCK_USERS,
 } from '@/data/mock-data';
-import { login as apiLogin, logout as apiLogout, refresh as apiRefresh } from '@/lib/auth-api';
+import {
+  changePassword as apiChangePassword,
+  login as apiLogin,
+  logout as apiLogout,
+  refresh as apiRefresh,
+} from '@/lib/auth-api';
 import * as clientsApi from '@/lib/clients-api';
 import * as locationsApi from '@/lib/locations-api';
 import * as equipmentApi from '@/lib/equipment-api';
@@ -71,7 +76,15 @@ type ResultWithId = { ok: true; id: string } | { ok: false; error: string; code?
 interface AppState {
   // --- sessão (UC-01) ---
   currentUser: User | null;
-  login: (email: string, senha: string) => Promise<Result>;
+  /**
+   * `mustChangePassword`: primeiro acesso — a senha foi aceita, mas a sessão NÃO é aberta
+   * (currentUser fica null) até `completeFirstAccess` redefinir a senha.
+   */
+  login: (email: string, senha: string) => Promise<Result & { mustChangePassword?: boolean }>;
+  /** Primeiro acesso: troca a senha provisória pela nova e abre a sessão. */
+  completeFirstAccess: (senhaAtual: string, novaSenha: string) => Promise<Result>;
+  /** Descarta a sessão parcial do primeiro acesso (usuário desistiu de redefinir). */
+  cancelFirstAccess: () => void;
   /** `remote: false` só limpa a sessão local (ex.: token já expirado/inválido). */
   logout: (options?: { remote?: boolean }) => void;
   /**
@@ -410,11 +423,13 @@ export const useAppStore = create<AppState>()(
       let token: string;
       let refreshToken: string;
       let user: User;
+      let mustChangePassword: boolean;
       try {
         const response = await apiLogin(normalized, senha);
         token = response.token;
         refreshToken = response.refreshToken;
         user = response.user;
+        mustChangePassword = response.mustChangePassword;
       } catch (error) {
         if (error instanceof ApiError) {
           return { ok: false, error: error.status === 401 ? 'E-mail ou senha inválidos.' : error.message };
@@ -431,9 +446,36 @@ export const useAppStore = create<AppState>()(
       }
       setAuthToken(token);
       setRefreshToken(refreshToken);
+      if (mustChangePassword) {
+        // Primeiro acesso: guarda só os tokens (necessários para chamar a troca de senha).
+        // Sem currentUser, o Shell não libera nenhuma rota protegida.
+        return { ok: true, mustChangePassword: true };
+      }
       set({ currentUser: user });
       pushAudit('ACESSOU', 'Sessão', user.id, 'Login no painel administrativo');
       return { ok: true };
+    },
+
+    completeFirstAccess: async (senhaAtual, novaSenha) => {
+      if (novaSenha.length < 8) return { ok: false, error: 'A nova senha deve ter ao menos 8 caracteres.' };
+      let response;
+      try {
+        response = await apiChangePassword(senhaAtual, novaSenha);
+      } catch (error) {
+        return toErrorResult(error, 'Não foi possível redefinir a senha. Tente novamente.');
+      }
+      setAuthToken(response.token);
+      setRefreshToken(response.refreshToken);
+      set({ currentUser: response.user });
+      pushAudit('ACESSOU', 'Sessão', response.user.id, 'Primeiro acesso: senha redefinida');
+      return { ok: true };
+    },
+
+    cancelFirstAccess: () => {
+      const refreshToken = getRefreshToken();
+      if (refreshToken) apiLogout(refreshToken).catch(() => {});
+      setAuthToken(null);
+      setRefreshToken(null);
     },
 
     logout: ({ remote = true } = {}) => {
