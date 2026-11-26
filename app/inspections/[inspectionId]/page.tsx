@@ -16,6 +16,7 @@ import { CancelInspectionAction } from '@/components/inspections/CancelInspectio
 import { CancellationInfo } from '@/components/inspections/CancellationInfo';
 import { InspectionMonitoring } from '@/components/inspections/InspectionMonitoring';
 import { InspectionReviewChecklist } from '@/components/inspections/InspectionReviewChecklist';
+import { DownloadReportButton } from '@/components/inspections/DownloadReportButton';
 import { EvidenceViewerProvider } from '@/components/inspections/EvidenceViewerContext';
 
 /**
@@ -154,11 +155,12 @@ export default function InspectionReviewPage() {
           <h1 className="text-2xl font-extrabold text-navy-900">{client?.nome}</h1>
           <p className="text-sm text-slate-500">{location?.nome}{equip ? ` · ${equip.nome}` : ''}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link href={`/inspections/${inspection.id}/relatorio`} className="text-sm font-bold text-navy-700 whitespace-nowrap">
+        <div className="flex items-start gap-3 flex-wrap justify-end">
+          {inspection.status === 'APROVADA' && <DownloadReportButton inspectionId={inspection.id} />}
+          <Link href={`/inspections/${inspection.id}/relatorio`} className="text-sm font-bold text-navy-700 whitespace-nowrap py-2">
             Exportar relatório (PDF)
           </Link>
-          <InspectionStatusBadge status={inspection.status} />
+          <span className="py-1.5"><InspectionStatusBadge status={inspection.status} /></span>
         </div>
       </div>
 
