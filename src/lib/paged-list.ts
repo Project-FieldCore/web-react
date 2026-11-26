@@ -53,13 +53,20 @@ export function buildQueryString(params: Record<string, string | number | undefi
   return text ? `?${text}` : '';
 }
 
+/** Ordenação e busca de uma listagem (sem paginação) — a exportação CSV usa só isto + os filtros. */
+export function sortAndSearchParams<F>(query: Pick<ListQuery<F>, 'sort' | 'q'>) {
+  return {
+    sort: toSortParam(query.sort),
+    q: query.q.trim() || undefined,
+  };
+}
+
 /** Parâmetros comuns de uma listagem, prontos para `buildQueryString`. */
 export function listParams<F>(query: Pick<ListQuery<F>, 'page' | 'size' | 'sort' | 'q'>) {
   return {
     page: query.page,
     size: query.size,
-    sort: toSortParam(query.sort),
-    q: query.q.trim() || undefined,
+    ...sortAndSearchParams(query),
   };
 }
 

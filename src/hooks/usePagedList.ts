@@ -102,6 +102,8 @@ export function usePagedList<T, F extends object>(
     page: state.page,
     size: state.size,
     sort: state.sort,
+    /** Busca já aplicada (a que está valendo na lista; `input` é o que está sendo digitado). */
+    q: state.q,
     input: state.input,
     filters: state.filters,
     hasActiveFilters,

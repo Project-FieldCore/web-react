@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
 import { ActiveBadge, StatCard } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
 import { FilterSelect, Pagination, SearchBox, SortSelect, type SortOption } from '@/components/ListControls';
+import { ExportCsvButton } from '@/components/ExportCsvButton';
+import { CSV_FILE_NAMES, exportClientsCsv } from '@/lib/csv-export-api';
 import { usePagedList } from '@/hooks/usePagedList';
 import * as clientsApi from '@/lib/clients-api';
 import type { Client } from '@/types';
@@ -26,6 +28,11 @@ const SORT_OPTIONS: SortOption[] = [
   { label: 'Mais recentes', sort: { field: 'createdAt', dir: 'desc' } },
   { label: 'Mais antigos', sort: { field: 'createdAt', dir: 'asc' } },
 ];
+
+/** Filtro da tela → filtro da API (a lista e a exportação CSV usam o mesmo mapeamento). */
+function toApiFilters(filters: ClientListFilters) {
+  return { ativo: filters.status === 'TODOS' ? undefined : filters.status === 'ATIVOS' };
+}
 
 interface ClientListFilters {
   status: ClientStatusFilter;
@@ -57,12 +64,14 @@ export default function ClientsPage() {
   // Busca, filtro, ordenação e paginação são feitos na API (PBI-0017.1).
   // Cada página carregada leva os itens ao store, para editar usar o `version` atual.
   const list = usePagedList<Client, ClientListFilters>(
-    ({ filters, ...query }) =>
-      clientsApi.searchClients({
-        ...query,
-        filters: { ativo: filters.status === 'TODOS' ? undefined : filters.status === 'ATIVOS' },
-      }),
+    ({ filters, ...query }) => clientsApi.searchClients({ ...query, filters: toApiFilters(filters) }),
     { size: 12, sort: SORT_OPTIONS[0].sort, filters: INITIAL_FILTERS, onLoaded: mergeClients }
+  );
+
+  // Exporta exatamente o que está filtrado na lista (mesma busca, filtro e ordenação).
+  const exportCsv = useCallback(
+    () => exportClientsCsv({ sort: list.sort, q: list.q, filters: toApiFilters(list.filters) }),
+    [list.sort, list.q, list.filters]
   );
 
   // Os cartões de resumo e a contagem de locais usam o cadastro completo.
@@ -111,9 +120,17 @@ export default function ClientsPage() {
           <h1 className="text-2xl font-extrabold text-navy-900">Clientes e locais</h1>
           <p className="text-sm text-slate-500">Cada local pertence a um cliente (RN-009); equipamentos ficam dentro do local.</p>
         </div>
-        <button onClick={() => setShowNew(true)} className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap">
-          + Novo cliente
-        </button>
+        <div className="flex items-start gap-3 flex-wrap">
+          <ExportCsvButton
+            fileName={CSV_FILE_NAMES.clients}
+            onExport={exportCsv}
+            disabled={list.status !== 'ready' || list.meta?.totalElements === 0}
+            disabledReason="Não há clientes para exportar."
+          />
+          <button onClick={() => setShowNew(true)} className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap">
+            + Novo cliente
+          </button>
+        </div>
       </div>
 
       {notice && (

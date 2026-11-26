@@ -1,5 +1,5 @@
 import { http } from './http';
-import { buildQueryString, fetchAllPages, listParams, type ListQuery, type Paged } from './paged-list';
+import { buildQueryString, fetchAllPages, sortAndSearchParams, type ListQuery, type Paged } from './paged-list';
 import type { User, UserRole, UserStatus } from '@/types';
 
 /**
@@ -59,14 +59,19 @@ export interface UserFilters {
   role?: UserRole;
 }
 
+/** Busca, ordenação e filtros da listagem em parâmetros da API (a exportação CSV usa os mesmos). */
+export function usersFilterParams(query: Pick<ListQuery<UserFilters>, 'sort' | 'q' | 'filters'>) {
+  return {
+    ...sortAndSearchParams(query),
+    status: query.filters.status ? STATUS_TO_API[query.filters.status] : undefined,
+    role: query.filters.role,
+  };
+}
+
 /** Uma página da listagem, com busca, filtros e ordenação feitos na API. */
 export async function searchUsers(query: ListQuery<UserFilters>): Promise<Paged<User>> {
   const response = await http.get<ApiUserPage>(
-    `/users${buildQueryString({
-      ...listParams(query),
-      status: query.filters.status ? STATUS_TO_API[query.filters.status] : undefined,
-      role: query.filters.role,
-    })}`
+    `/users${buildQueryString({ page: query.page, size: query.size, ...usersFilterParams(query) })}`
   );
   return { items: response.items.map(toUser), page: response.page };
 }

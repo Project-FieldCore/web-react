@@ -1,5 +1,5 @@
 import { http } from './http';
-import { buildQueryString, fetchAllPages, listParams, type ListQuery, type Paged } from './paged-list';
+import { buildQueryString, fetchAllPages, sortAndSearchParams, type ListQuery, type Paged } from './paged-list';
 import type { Equipment } from '@/types';
 
 /**
@@ -49,15 +49,20 @@ export interface EquipmentFilters {
   localId?: string;
 }
 
+/** Busca, ordenação e filtros da listagem em parâmetros da API (a exportação CSV usa os mesmos). */
+export function equipmentFilterParams(query: Pick<ListQuery<EquipmentFilters>, 'sort' | 'q' | 'filters'>) {
+  const { ativo, localId } = query.filters;
+  return {
+    ...sortAndSearchParams(query),
+    status: ativo === undefined ? undefined : ativo ? 'ACTIVE' : 'INACTIVE',
+    siteId: localId,
+  };
+}
+
 /** Uma página da listagem global, com busca, filtros e ordenação na API. */
 export async function searchEquipment(query: ListQuery<EquipmentFilters>): Promise<Paged<Equipment>> {
-  const { ativo, localId } = query.filters;
   const response = await http.get<ApiEquipmentPage>(
-    `/equipment${buildQueryString({
-      ...listParams(query),
-      status: ativo === undefined ? undefined : ativo ? 'ACTIVE' : 'INACTIVE',
-      siteId: localId,
-    })}`
+    `/equipment${buildQueryString({ page: query.page, size: query.size, ...equipmentFilterParams(query) })}`
   );
   return { items: response.items.map(toEquipment), page: response.page };
 }

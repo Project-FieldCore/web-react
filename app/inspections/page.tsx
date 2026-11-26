@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
@@ -8,6 +8,8 @@ import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
 import { FilterSelect, Pagination, SortSelect, type SortOption } from '@/components/ListControls';
 import { formatDateTime } from '@/lib/inspection-display';
 import { inspectionStatusToApi, listInspections } from '@/lib/inspections-api';
+import { ExportCsvButton } from '@/components/ExportCsvButton';
+import { CSV_FILE_NAMES, INSPECTIONS_EXPORT_LIMIT, exportInspectionsCsv } from '@/lib/csv-export-api';
 import { usePagedList } from '@/hooks/usePagedList';
 import type { Inspection, InspectionStatus } from '@/types';
 
@@ -46,6 +48,17 @@ const INITIAL_FILTERS: InspectionFilters = {
   scheduledTo: '',
 };
 
+/** Filtros da tela → filtros da API (a lista e a exportação CSV usam o mesmo mapeamento). */
+function toApiFilters(filters: InspectionFilters) {
+  return {
+    status: filters.status === 'TODAS' ? undefined : inspectionStatusToApi(filters.status),
+    technicianId: filters.technicianId === 'TODOS' ? undefined : filters.technicianId,
+    clientId: filters.clientId === 'TODOS' ? undefined : filters.clientId,
+    scheduledFrom: toIso(filters.scheduledFrom),
+    scheduledTo: toIso(filters.scheduledTo),
+  };
+}
+
 function toIso(value: string): string | undefined {
   if (!value) return undefined;
   const date = new Date(value);
@@ -64,17 +77,7 @@ export default function InspectionsListPage() {
   const technicians = users.filter((u) => u.role === 'TECHNICIAN' && u.status === 'ATIVO');
 
   const list = usePagedList<Inspection, InspectionFilters>(
-    (query) =>
-      listInspections({
-        ...query,
-        filters: {
-          status: query.filters.status === 'TODAS' ? undefined : inspectionStatusToApi(query.filters.status),
-          technicianId: query.filters.technicianId === 'TODOS' ? undefined : query.filters.technicianId,
-          clientId: query.filters.clientId === 'TODOS' ? undefined : query.filters.clientId,
-          scheduledFrom: toIso(query.filters.scheduledFrom),
-          scheduledTo: toIso(query.filters.scheduledTo),
-        },
-      }),
+    (query) => listInspections({ ...query, filters: toApiFilters(query.filters) }),
     {
       size: 20,
       sort: SORT_OPTIONS[0].sort,
@@ -105,6 +108,12 @@ export default function InspectionsListPage() {
     }
   );
 
+  // Exporta exatamente o que está filtrado na lista (mesma busca, filtros e ordenação).
+  const exportCsv = useCallback(
+    () => exportInspectionsCsv({ sort: list.sort, q: list.q, filters: toApiFilters(list.filters) }),
+    [list.sort, list.q, list.filters]
+  );
+
   useEffect(() => {
     void loadClients();
     void loadUsers();
@@ -115,8 +124,23 @@ export default function InspectionsListPage() {
 
   return (
     <div className="w-full min-w-0">
-      <h1 className="text-2xl font-extrabold text-navy-900 mb-1">Inspeções</h1>
-      <p className="text-sm text-slate-500 mb-6">Acompanhe o andamento e abra a revisão das inspeções enviadas (UC-15, UC-16)</p>
+      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-navy-900 mb-1">Inspeções</h1>
+          <p className="text-sm text-slate-500">Acompanhe o andamento e abra a revisão das inspeções enviadas (UC-15, UC-16)</p>
+        </div>
+        <ExportCsvButton
+          fileName={CSV_FILE_NAMES.inspections}
+          onExport={exportCsv}
+          disabled={list.status !== 'ready' || list.meta?.totalElements === 0}
+          disabledReason="Não há inspeções para exportar."
+          note={
+            list.meta && list.meta.totalElements > INSPECTIONS_EXPORT_LIMIT
+              ? `Serão exportadas as primeiras ${INSPECTIONS_EXPORT_LIMIT.toLocaleString('pt-BR')} inspeções.`
+              : undefined
+          }
+        />
+      </div>
 
       {list.filters.status === 'ENVIADA' && (
         <p className="text-sm text-slate-600 mb-4">

@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
 import { ActiveBadge, StatCard } from '@/components/Badges';
 import { FilterSelect, Pagination, SearchBox, SortSelect, type SortOption } from '@/components/ListControls';
+import { ExportCsvButton } from '@/components/ExportCsvButton';
+import { CSV_FILE_NAMES, exportEquipmentCsv } from '@/lib/csv-export-api';
 import { usePagedList } from '@/hooks/usePagedList';
 import * as equipmentApi from '@/lib/equipment-api';
 import type { Equipment } from '@/types';
@@ -93,6 +95,25 @@ export default function EquipmentCatalogPage() {
     { size: 12, sort: SORT_OPTIONS[0].sort, filters: INITIAL_FILTERS, onLoaded: mergeEquipment }
   );
 
+  // A API exporta por local (siteId), não por cliente: com um cliente que tem vários locais,
+  // a exportação não reproduziria o que a lista mostra — então o botão fica desabilitado.
+  const exportScope = useMemo(() => {
+    const { clientId, status } = list.filters;
+    const ativo = status === 'TODOS' ? undefined : status === 'ATIVOS';
+    if (clientId === 'TODOS') return { ok: true as const, filters: { ativo } };
+    const siteIds = locations.filter((l) => l.clienteId === clientId).map((l) => l.id);
+    if (siteIds.length === 1) return { ok: true as const, filters: { ativo, localId: siteIds[0] } };
+    return {
+      ok: false as const,
+      reason: 'A exportação não filtra por cliente com vários locais. Escolha "Todos os clientes" ou um cliente com um único local.',
+    };
+  }, [list.filters, locations]);
+
+  const exportCsv = useCallback(
+    () => exportEquipmentCsv({ sort: list.sort, q: list.q, filters: exportScope.ok ? exportScope.filters : {} }),
+    [list.sort, list.q, exportScope]
+  );
+
   useEffect(() => {
     void loadEquipment();
     void loadLocations();
@@ -134,11 +155,19 @@ export default function EquipmentCatalogPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-extrabold text-navy-900">Equipamentos</h1>
-        <p className="text-sm text-slate-500">
-          Catálogo consolidado — para cadastrar um novo, acesse o local correspondente (RN-010).
-        </p>
+      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-navy-900">Equipamentos</h1>
+          <p className="text-sm text-slate-500">
+            Catálogo consolidado — para cadastrar um novo, acesse o local correspondente (RN-010).
+          </p>
+        </div>
+        <ExportCsvButton
+          fileName={CSV_FILE_NAMES.equipment}
+          onExport={exportCsv}
+          disabled={list.status !== 'ready' || list.meta?.totalElements === 0 || !exportScope.ok}
+          disabledReason={exportScope.ok ? 'Não há equipamentos para exportar.' : exportScope.reason}
+        />
       </div>
 
       {notice && (

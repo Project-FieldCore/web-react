@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
 import { StatCard, UserStatusBadge } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
 import { FilterSelect, Pagination, SearchBox, SortSelect, SortableTh, type SortOption } from '@/components/ListControls';
+import { ExportCsvButton } from '@/components/ExportCsvButton';
+import { CSV_FILE_NAMES, exportUsersCsv } from '@/lib/csv-export-api';
 import { usePagedList } from '@/hooks/usePagedList';
 import * as usersApi from '@/lib/users-api';
 import type { AccessRequest, User, UserRole, UserStatus } from '@/types';
@@ -45,6 +47,14 @@ interface UserListFilters {
 
 const INITIAL_FILTERS: UserListFilters = { role: 'TODOS', status: 'TODOS' };
 
+/** Filtros da tela → filtros da API (a lista e a exportação CSV usam o mesmo mapeamento). */
+function toApiFilters(filters: UserListFilters) {
+  return {
+    role: filters.role === 'TODOS' ? undefined : filters.role,
+    status: filters.status === 'TODOS' ? undefined : filters.status,
+  };
+}
+
 const ROLE_FILTERS: { key: 'TODOS' | UserRole; label: string }[] = [
   { key: 'TODOS', label: 'Todos' },
   { key: 'ADMIN', label: 'Administradores' },
@@ -78,15 +88,14 @@ export default function UsersPage() {
   // Busca, filtros, ordenação e paginação são feitos na API (PBI-0017.1).
   // Cada página carregada leva os itens ao store, para editar usar o `version` atual.
   const list = usePagedList<User, UserListFilters>(
-    ({ filters, ...query }) =>
-      usersApi.searchUsers({
-        ...query,
-        filters: {
-          role: filters.role === 'TODOS' ? undefined : filters.role,
-          status: filters.status === 'TODOS' ? undefined : filters.status,
-        },
-      }),
+    ({ filters, ...query }) => usersApi.searchUsers({ ...query, filters: toApiFilters(filters) }),
     { sort: SORT_OPTIONS[0].sort, filters: INITIAL_FILTERS, onLoaded: mergeUsers }
+  );
+
+  // Exporta exatamente o que está filtrado na lista (mesma busca, filtros e ordenação).
+  const exportCsv = useCallback(
+    () => exportUsersCsv({ sort: list.sort, q: list.q, filters: toApiFilters(list.filters) }),
+    [list.sort, list.q, list.filters]
   );
 
   // Os cartões de resumo usam o cadastro completo (todas as páginas).
@@ -155,9 +164,17 @@ export default function UsersPage() {
           <h1 className="text-2xl font-extrabold text-navy-900">Usuários</h1>
           <p className="text-sm text-slate-500">Contas de acesso ao painel e ao aplicativo de campo (RN-001, RN-002)</p>
         </div>
-        <button onClick={() => setModalUser('new')} className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap">
-          + Novo usuário
-        </button>
+        <div className="flex items-start gap-3 flex-wrap">
+          <ExportCsvButton
+            fileName={CSV_FILE_NAMES.users}
+            onExport={exportCsv}
+            disabled={list.status !== 'ready' || list.meta?.totalElements === 0}
+            disabledReason="Não há usuários para exportar."
+          />
+          <button onClick={() => setModalUser('new')} className="bg-brandgreen-600 text-white font-bold text-sm rounded-xl px-4 py-2.5 whitespace-nowrap">
+            + Novo usuário
+          </button>
+        </div>
       </div>
 
       {notice && (
