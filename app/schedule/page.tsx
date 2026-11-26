@@ -10,7 +10,6 @@ import { SYNC_NOTICE } from '@/lib/technician-rules';
 import { PRIORITY_LABEL, formatDateTime, summarizeInstructions } from '@/lib/inspection-display';
 import {
   MAX_INSTRUCTIONS,
-  isLocalOnlySchedule,
   missingScheduleFields,
   validateScheduleDate,
 } from '@/lib/schedule-rules';
@@ -27,7 +26,9 @@ import type { Equipment, Priority } from '@/types';
  */
 export default function SchedulePage() {
   const router = useRouter();
-  const models = useAppStore((s) => s.models.filter((m) => m.status === 'PUBLICADO'));
+  const modelsStatus = useAppStore((s) => s.modelsStatus);
+  const loadModels = useAppStore((s) => s.loadModels);
+  const models = useAppStore((s) => (s.modelsStatus === 'ready' ? s.models.filter((m) => m.status === 'PUBLICADO') : []));
   const clients = useAppStore((s) => s.clients);
   const clientsStatus = useAppStore((s) => s.clientsStatus);
   const loadClients = useAppStore((s) => s.loadClients);
@@ -54,9 +55,13 @@ export default function SchedulePage() {
 
   // Clientes vêm da API; cliente inativo fica fora de novos agendamentos.
   useEffect(() => {
+    void loadModels();
     void loadClients();
     void loadLocations();
-  }, [loadClients, loadLocations]);
+  }, [loadModels, loadClients, loadLocations]);
+  useEffect(() => {
+    if (!modeloId && models.length > 0) setModeloId(models[0].id);
+  }, [modeloId, models]);
   const activeClients = useMemo(() => clients.filter((c) => c.ativo), [clients]);
   const clientsLoading = clientsStatus === 'idle' || clientsStatus === 'loading';
 
@@ -76,7 +81,6 @@ export default function SchedulePage() {
   const selectedLocation = locations.find((l) => l.id === localId);
   const selectedEquipment = availableEquipment.find((e) => e.id === equipamentoId);
   const selectedTech = users.find((u) => u.id === tecnicoId);
-  const localOnly = isLocalOnlySchedule(selectedModel);
 
   // RN-025: campos obrigatórios para habilitar o envio; a API também exige data futura.
   const missing = missingScheduleFields({ modeloId, clienteId, localId, tecnicoId, dataPrevista });
@@ -141,7 +145,7 @@ export default function SchedulePage() {
     if (!result.ok) return;
     // RN-028: inspeção enviada pela API aparece para o técnico depois da sincronização no aplicativo.
     setSuccess(
-      `Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}.${localOnly ? '' : ` ${SYNC_NOTICE}`}`
+      `Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}. ${SYNC_NOTICE}`
     );
     setTimeout(() => router.push('/inspections'), 900);
   }
@@ -155,7 +159,7 @@ export default function SchedulePage() {
         <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100 min-w-0">
           <Section step={1} title="Modelo de inspeção">
             <Field label="Modelo (apenas versões publicadas)" required>
-              <select value={modeloId} onChange={(e) => setModeloId(e.target.value)} className="input">
+              <select value={modeloId} onChange={(e) => setModeloId(e.target.value)} disabled={modelsStatus !== 'ready'} className="input disabled:bg-slate-50 disabled:text-slate-400">
                 <option value="">Selecione...</option>
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>{m.title} · v{m.version}</option>
@@ -165,12 +169,6 @@ export default function SchedulePage() {
             {models.length === 0 && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 Nenhum modelo publicado disponível. Publique uma versão em Modelos de inspeção.
-              </p>
-            )}
-            {selectedModel && localOnly && (
-              <p role="note" className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mt-3">
-                Este modelo ainda não está ligado a uma versão publicada na API. O agendamento fica só nesta sessão e não é
-                enviado ao servidor.
               </p>
             )}
           </Section>
@@ -256,11 +254,6 @@ export default function SchedulePage() {
               {equipamentoId && !equipmentIsCompatible && (
                 <p role="alert" className="text-xs text-red-600 font-semibold mt-1">
                   O equipamento selecionado não é compatível com o local escolhido.
-                </p>
-              )}
-              {equipamentoId && !localOnly && (
-                <p className="text-xs text-slate-500 mt-1">
-                  O equipamento fica registrado só na tela: a API de agendamento ainda não o recebe.
                 </p>
               )}
             </Field>

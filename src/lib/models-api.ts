@@ -47,6 +47,8 @@ function toModel(template: ApiTemplate): InspectionModel {
     status: STATUS_FROM_API[template.status],
     version: template.currentVersion ?? 0,
     lockVersion: template.version,
+    // Uma versão ACTIVE é a versão publicada e pode ser usada diretamente no agendamento.
+    templateVersionId: template.status === 'ACTIVE' ? template.latestVersionId ?? undefined : undefined,
     draftVersionId: template.draftVersionId ?? undefined,
     latestVersionId: template.latestVersionId ?? undefined,
     sections: [],
@@ -72,6 +74,11 @@ export async function createModel(input: NewModelInput): Promise<InspectionModel
 
 export async function getModel(id: string): Promise<InspectionModel> {
   return toModel(await http.get<ApiTemplate>(`/inspection-templates/${id}`));
+}
+
+/** Catálogo persistido de modelos; não usa os dados de demonstração do store. */
+export async function listModels(): Promise<InspectionModel[]> {
+  return (await http.get<ApiTemplate[]>('/inspection-templates')).map(toModel);
 }
 
 /** Edita título, categoria e/ou descrição do rascunho. `lockVersion` é a versão de edição carregada. */

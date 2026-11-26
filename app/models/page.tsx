@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
@@ -23,6 +23,7 @@ const STATUS_FILTERS: { key: 'TODOS' | ModelStatus; label: string }[] = [
  */
 export default function ModelsPage() {
   const models = useAppStore((s) => s.models);
+  const loadModels = useAppStore((s) => s.loadModels);
   const createDraftModel = useAppStore((s) => s.createDraftModel);
   const router = useRouter();
   const [showNew, setShowNew] = useState(false);
@@ -30,6 +31,8 @@ export default function ModelsPage() {
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]['key']>('TODOS');
   const [categoryFilter, setCategoryFilter] = useState('TODAS');
   const [search, setSearch] = useState('');
+
+  useEffect(() => { void loadModels(); }, [loadModels]);
 
   const categories = useMemo(() => Array.from(new Set(models.map((m) => m.category))).sort(), [models]);
   const publishedCount = models.filter((m) => m.status === 'PUBLICADO').length;

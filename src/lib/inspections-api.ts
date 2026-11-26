@@ -196,6 +196,12 @@ export async function listInspections(query: ListQuery<InspectionListFilters>): 
   };
 }
 
+/** Carrega uma inspeção persistida para que links diretos/refresh não dependam do store do navegador. */
+export async function getInspection(id: string): Promise<Inspection> {
+  const item = await http.get<ApiInspection>(`/inspections/${id}`);
+  return toInspection(item, { modeloId: item.templateVersionId, modeloVersao: 0 });
+}
+
 export function inspectionStatusToApi(status: InspectionStatus): ApiInspectionStatus | undefined {
   if (status === 'DEVOLVIDA') return undefined;
   return STATUS_TO_API[status];

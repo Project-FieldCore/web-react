@@ -47,7 +47,7 @@ import { applyItemPatch, missingEvidence, missingObservation } from '@/lib/item-
 import { blockingIssues, validateModel } from '@/lib/model-validation';
 import { activeTechnicians as listAssignable, assignBlockedReason, reassignBlockedReason } from '@/lib/technician-rules';
 import { buildCancellation, cancelBlockedReason, validateJustification } from '@/lib/cancel-rules';
-import { buildLocalInspection, isLocalOnlySchedule, validateSchedule } from '@/lib/schedule-rules';
+import { validateSchedule } from '@/lib/schedule-rules';
 import { discardNewVersion, hasUnpublishedChanges, isLocked, markPublished, startNewVersion } from '@/lib/model-versions';
 import { moveSection as moveSectionInList, nextDisplayOrder, normalizeSectionOrder, type MoveDirection } from '@/lib/section-order';
 import * as inspectionsApi from '@/lib/inspections-api';
@@ -117,7 +117,13 @@ interface AppState {
   mergeLocations: (items: Location[]) => void;
   mergeEquipment: (items: Equipment[]) => void;
   models: InspectionModel[];
+  /** Catálogo de modelos persistidos na API. */
+  modelsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  modelsError: string | null;
+  loadModels: () => Promise<void>;
   inspections: Inspection[];
+  /** Busca uma inspeção persistida ao abrir um link direto. */
+  loadInspection: (id: string) => Promise<void>;
   auditEvents: AuditEvent[];
   accessRequests: AccessRequest[];
   syncQueue: SyncQueueItem[];
@@ -381,6 +387,8 @@ export const useAppStore = create<AppState>()(
     techniciansStatus: 'idle',
     techniciansError: null,
     models: MOCK_MODELS,
+    modelsStatus: 'idle',
+    modelsError: null,
     modelLoad: { id: null, status: 'idle', error: null },
     inspections: MOCK_INSPECTIONS,
     auditEvents: MOCK_AUDIT_EVENTS,
@@ -765,6 +773,26 @@ export const useAppStore = create<AppState>()(
     },
 
     // RN-015: título e categoria obrigatórios. O título é único na API (409 se repetir).
+    loadInspection: async (id) => {
+      try {
+        const inspection = await inspectionsApi.getInspection(id);
+        set((s) => ({ inspections: [inspection, ...s.inspections.filter((item) => item.id !== id)] }));
+      } catch {
+        // A tela de detalhe mostra o estado de erro apropriado; não mantém um registro fictício.
+      }
+    },
+
+    loadModels: async () => {
+      set({ modelsStatus: 'loading', modelsError: null });
+      try {
+        const models = await modelsApi.listModels();
+        set({ models, modelsStatus: 'ready', modelsError: null });
+      } catch (error) {
+        const { error: message } = toErrorResult(error, 'Não foi possível carregar os modelos. Tente novamente.');
+        set({ modelsStatus: 'error', modelsError: message });
+      }
+    },
+
     createDraftModel: async (input) => {
       const title = input.title.trim();
       const category = input.category.trim();
@@ -1158,11 +1186,15 @@ export const useAppStore = create<AppState>()(
       }
 
       let inspection: Inspection;
-      if (isLocalOnlySchedule(model)) {
+      if (!model.templateVersionId) {
+        return { ok: false, error: 'A versão publicada deste modelo não está disponível. Atualize a página e tente novamente.' };
+        /*
         // O modelo ainda não tem o id da versão publicada na API (que o agendamento exige):
         // a inspeção nasce ATRIBUÍDA só na tela, sem chamar a API.
         inspection = buildLocalInspection(input, model, newId('INS'));
-      } else {
+        */
+      }
+      {
         try {
           inspection = await inspectionsApi.scheduleInspection(input, model.templateVersionId!, model.version);
         } catch (error) {

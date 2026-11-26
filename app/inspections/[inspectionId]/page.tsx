@@ -33,6 +33,12 @@ export default function InspectionReviewPage() {
   const [fromReviewQueue, setFromReviewQueue] = useState(false);
 
   const inspection = useAppStore((s) => s.inspections.find((i) => i.id === inspectionId));
+  const loadInspection = useAppStore((s) => s.loadInspection);
+  const loadModels = useAppStore((s) => s.loadModels);
+  const loadClients = useAppStore((s) => s.loadClients);
+  const loadLocations = useAppStore((s) => s.loadLocations);
+  const loadUsers = useAppStore((s) => s.loadUsers);
+  const loadEquipment = useAppStore((s) => s.loadEquipment);
   const models = useAppStore((s) => s.models);
   const clients = useAppStore((s) => s.clients);
   const locations = useAppStore((s) => s.locations);
@@ -63,6 +69,15 @@ export default function InspectionReviewPage() {
   }, []);
 
   useEffect(() => {
+    void loadInspection(inspectionId);
+    void loadModels();
+    void loadClients();
+    void loadLocations();
+    void loadUsers();
+    void loadEquipment();
+  }, [inspectionId, loadInspection, loadModels, loadClients, loadLocations, loadUsers, loadEquipment]);
+
+  useEffect(() => {
     if (!reassignNotice) return;
     const timer = setTimeout(() => setReassignNotice(null), 5000);
     return () => clearTimeout(timer);
@@ -76,7 +91,7 @@ export default function InspectionReviewPage() {
 
   if (!inspection) return <ErrorState title="Inspeção não encontrada" message="Ela pode ter sido removida ou o link está incorreto." />;
 
-  const model = models.find((m) => m.id === inspection.modeloId);
+  const model = models.find((m) => m.id === inspection.modeloId || m.templateVersionId === inspection.modeloId);
   const client = clients.find((c) => c.id === inspection.clienteId);
   const location = locations.find((l) => l.id === inspection.localId);
   const equip = equipment.find((e) => e.id === inspection.equipamentoId);
