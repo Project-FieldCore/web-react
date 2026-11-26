@@ -837,14 +837,20 @@ export const useAppStore = create<AppState>()(
           summaries.map(async (model) => {
             const versionId = model.draftVersionId ?? model.latestVersionId;
             if (!versionId) return model;
-            const sections = await sectionsApi.listSections(versionId);
-            const withItems = await Promise.all(
-              sections.map(async (section) => ({
-                ...section,
-                items: await itemsApi.listItems(section.id),
-              }))
-            );
-            return { ...model, sections: withItems };
+            try {
+              const sections = await sectionsApi.listSections(versionId);
+              const withItems = await Promise.all(
+                sections.map(async (section) => ({
+                  ...section,
+                  items: await itemsApi.listItems(section.id),
+                }))
+              );
+              return { ...model, sections: withItems };
+            } catch {
+              // A listagem continua utilizável para agendamento mesmo que um
+              // total de checklist isolado não possa ser obtido.
+              return model;
+            }
           })
         );
         set({ models, modelsStatus: 'ready', modelsError: null });
