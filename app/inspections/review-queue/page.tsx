@@ -69,6 +69,17 @@ function reviewQueueErrorCopy(error: unknown): { title: string; message: string;
  * PBI-0056.2 — Fila de revisão (UC / AC-REVIEW).
  * Lista só via GET /inspections/review-queue; linha abre o detalhe (sem aprovar/reprovar aqui).
  */
+/** Data em cima e hora embaixo: cabe na coluna estreita sem invadir a vizinha. */
+function DateTimeCell({ value }: { value: string | null | undefined }) {
+  const [date, time] = formatDateTime(value).split(' ');
+  return (
+    <div className="text-xs leading-snug tabular-nums">
+      <div className="text-slate-700">{date}</div>
+      {time ? <div className="text-slate-400">{time}</div> : null}
+    </div>
+  );
+}
+
 export default function ReviewQueuePage() {
   const clients = useAppStore((s) => s.clients);
   const users = useAppStore((s) => s.users);
@@ -191,34 +202,36 @@ export default function ReviewQueuePage() {
         <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden ${list.refreshing ? 'opacity-70' : ''}`}>
           <table className="hidden xl:table w-full text-sm table-fixed">
             <colgroup>
-              <col className="w-[20%]" />
-              <col className="w-[14%]" />
+              <col className="w-[22%]" />
+              <col className="w-[15%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[9%]" />
               <col className="w-[12%]" />
-              <col className="w-[12%]" />
-              <col className="w-[10%]" />
-              <col className="w-[12%]" />
-              <col className="w-[10%]" />
-              <col className="w-[10%]" />
+              <col className="w-[9%]" />
+              <col className="w-[9%]" />
             </colgroup>
             <thead>
-              <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-100">
-                <th className="px-5 py-3">Título</th>
-                <th className="px-5 py-3">Cliente</th>
-                <th className="px-5 py-3">Local</th>
-                <th className="px-5 py-3">Técnico</th>
-                <th className="px-5 py-3">Prioridade</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Enviada em</th>
-                <th className="px-5 py-3">Prazo</th>
+              <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-200 bg-slate-50/60">
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Título</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Cliente</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Local</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Técnico</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Prioridade</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Status</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Enviada em</th>
+                <th className="px-3 py-3.5 font-semibold tracking-wide">Prazo</th>
               </tr>
             </thead>
             <tbody>
               {list.items.map((item) => (
-                <tr key={item.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                  <td className="px-5 py-3 font-semibold text-navy-900 truncate">
+                <tr key={item.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 align-middle">
+                  <td className="px-3 py-3.5">
                     <Link
                       href={`/inspections/${item.id}?from=review-queue`}
                       aria-label={`Abrir inspeção ${item.title} para revisão`}
+                      title={item.title}
+                      className="block font-semibold text-navy-900 leading-snug line-clamp-2 break-words hover:underline"
                       onClick={() => ensureInspectionFromReviewQueue(item)}
                     >
                       {item.title}
@@ -227,17 +240,30 @@ export default function ReviewQueuePage() {
                       <div className="font-mono text-[10px] font-normal text-slate-400">{item.id.slice(0, 8)}</div>
                     ) : null}
                   </td>
-                  <td className="px-5 py-3 text-slate-700 truncate">{item.clientName}</td>
-                  <td className="px-5 py-3 text-slate-500 truncate">{item.siteName}</td>
-                  <td className="px-5 py-3 text-slate-600 truncate">{item.technicianName}</td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 py-3.5 text-slate-700">
+                    <span className="block leading-snug line-clamp-2 break-words" title={item.clientName}>{item.clientName}</span>
+                  </td>
+                  <td className="px-3 py-3.5 text-slate-500">
+                    <span className="block leading-snug line-clamp-2 break-words" title={item.siteName}>{item.siteName}</span>
+                  </td>
+                  <td className="px-3 py-3.5 text-slate-600">
+                    <span className="block leading-snug line-clamp-2 break-words" title={item.technicianName}>{item.technicianName}</span>
+                  </td>
+                  <td className="px-3 py-3.5">
                     <PriorityTag priority={item.prioridade} />
                   </td>
-                  <td className="px-5 py-3">
-                    <InspectionStatusBadge status="ENVIADA" />
+                  <td className="px-3 py-3.5">
+                    {/* O selo é nowrap por padrão; aqui pode quebrar em 2 linhas para não invadir a coluna ao lado. */}
+                    <div className="[&>span]:inline-block [&>span]:whitespace-normal [&>span]:leading-tight">
+                      <InspectionStatusBadge status="ENVIADA" />
+                    </div>
                   </td>
-                  <td className="px-5 py-3 text-slate-500 font-mono text-xs">{formatDateTime(item.submittedAt)}</td>
-                  <td className="px-5 py-3 text-slate-500 font-mono text-xs">{formatDateTime(item.scheduledFor)}</td>
+                  <td className="px-3 py-3.5">
+                    <DateTimeCell value={item.submittedAt} />
+                  </td>
+                  <td className="px-3 py-3.5">
+                    <DateTimeCell value={item.scheduledFor} />
+                  </td>
                 </tr>
               ))}
               {list.items.length === 0 && (
