@@ -337,7 +337,11 @@ export default function ModelBuilderPage() {
                         <select
                           value={item.type}
                           onChange={(e) => {
-                            void updateItem(model.id, section.id, item.id, { type: e.target.value as ItemType }).then((result) => {
+                            const type = e.target.value as ItemType;
+                            void updateItem(model.id, section.id, item.id, {
+                              type,
+                              options: type === 'SINGLE_CHOICE' ? (item.options?.length ? item.options : ['Opção 1', 'Opção 2']) : [],
+                            }).then((result) => {
                               setStructureError(result.ok ? null : result.error);
                             });
                           }}

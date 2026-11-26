@@ -887,7 +887,15 @@ export const useAppStore = create<AppState>()(
       if (!model) return { ok: false, error: 'Modelo não encontrado.' };
       if (isLocked(model)) return { ok: false, error: 'A versão publicada é imutável (RN-019).' };
       try {
-        replaceModel(await modelsApi.saveModel(model));
+        if (model.lockVersion === undefined) {
+          return { ok: false, error: 'Este modelo não está disponível na API. Atualize a página e tente novamente.' };
+        }
+        const saved = await modelsApi.updateModelMeta(modelId, {
+          title: model.title,
+          category: model.category,
+          description: model.description,
+        }, model.lockVersion);
+        set((s) => ({ models: s.models.map((current) => current.id === modelId ? { ...saved, sections: current.sections } : current) }));
       } catch (error) {
         return toErrorResult(error, 'Não foi possível salvar o modelo. Tente novamente.');
       }
