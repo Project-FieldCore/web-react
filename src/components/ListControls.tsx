@@ -41,7 +41,7 @@ export function FilterSelect<V extends string>({
       value={value}
       onChange={(e) => onChange(e.target.value as V)}
       aria-label={label}
-      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 bg-white"
+      className="ui-select text-xs"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -73,7 +73,7 @@ export function SortSelect({
       value={index}
       onChange={(e) => onChange(options[Number(e.target.value)].sort)}
       aria-label="Ordenar por"
-      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 bg-white"
+      className="ui-select text-xs"
     >
       {options.map((o, i) => (
         <option key={`${o.sort.field}-${o.sort.dir}`} value={i}>
@@ -138,7 +138,7 @@ export function Pagination({
           <select
             value={meta.size}
             onChange={(e) => onSize(Number(e.target.value))}
-            className="border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-600 bg-white"
+            className="ui-select ui-select--compact text-xs"
           >
             {options.map((n) => (
               <option key={n} value={n}>

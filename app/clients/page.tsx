@@ -118,7 +118,7 @@ export default function ClientsPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-extrabold text-navy-900">Clientes e locais</h1>
-          <p className="text-sm text-slate-500">Cada local pertence a um cliente (RN-009); equipamentos ficam dentro do local.</p>
+          <p className="text-sm text-slate-500">Cada local pertence a um cliente; equipamentos ficam dentro do local.</p>
         </div>
         <div className="flex items-start gap-3 flex-wrap">
           <ExportCsvButton

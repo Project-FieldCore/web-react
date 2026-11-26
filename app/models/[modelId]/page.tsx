@@ -204,7 +204,7 @@ export default function ModelBuilderPage() {
           <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-4">
             {locked && (
               <div className="bg-slate-50 border border-slate-200 text-slate-600 text-xs font-semibold rounded-xl px-4 py-3 mb-4">
-                A versão publicada é imutável (RN-019). Crie uma nova versão para alterar o título, a categoria, a descrição ou o checklist.
+                A versão publicada é imutável. Crie uma nova versão para alterar o título, a categoria, a descrição ou o checklist.
               </div>
             )}
             <label className="text-xs font-bold text-navy-700 uppercase block mb-1" htmlFor="model-title">Título</label>
@@ -257,7 +257,7 @@ export default function ModelBuilderPage() {
           {model.sections.length === 0 && (
             <div className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center mb-4">
               <p className="text-sm font-semibold text-slate-500 mb-1">Nenhuma seção ainda</p>
-              <p className="text-xs text-slate-400">Adicione a primeira seção abaixo para começar a montar o checklist (RN-015).</p>
+              <p className="text-xs text-slate-400">Adicione a primeira seção abaixo para começar a montar o checklist.</p>
             </div>
           )}
 
@@ -387,7 +387,7 @@ export default function ModelBuilderPage() {
                                   });
                                 }}
                               />
-                              Exige evidência se não conforme (RN-039)
+                              Exige evidência se não conforme
                             </label>
                           </>
                         )}
@@ -455,7 +455,7 @@ export default function ModelBuilderPage() {
               <SummaryRow label="Itens" value={totalItems} />
               <SummaryRow label="Obrigatórios" value={requiredItems} />
               <SummaryRow label="Exigem observação" value={observationItems} />
-              <SummaryRow label="Críticos (RN-039)" value={criticalItems} />
+              <SummaryRow label="Críticos" value={criticalItems} />
             </dl>
           </div>
 
@@ -473,16 +473,6 @@ export default function ModelBuilderPage() {
             onDiscard={handleDiscard}
           />
 
-          <div className="bg-navy-900 text-white rounded-2xl p-5">
-            <h2 className="text-xs font-bold text-brandgreen-500 uppercase mb-2">Regras de negócio</h2>
-            <ul className="space-y-2 text-xs text-slate-300 leading-relaxed">
-              <li><strong className="text-white">RN-015</strong> — Título, categoria e ao menos uma seção com item válido.</li>
-              <li><strong className="text-white">RN-016</strong> — Todo item precisa de um tipo de resposta.</li>
-              <li><strong className="text-white">RN-018</strong> — Modelo em rascunho pode ser alterado livremente.</li>
-              <li><strong className="text-white">RN-019/020</strong> — Versão publicada é imutável; alterar gera nova versão.</li>
-              <li><strong className="text-white">RN-039</strong> — Itens críticos exigem evidência quando não conformes.</li>
-            </ul>
-          </div>
 
           <InlineError message={confirmingPublish ? save.error : (publish.error ?? save.error)} />
           {publishSuccess && (

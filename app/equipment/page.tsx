@@ -150,7 +150,7 @@ export default function EquipmentCatalogPage() {
       }
     : {
         title: 'Nenhum equipamento cadastrado',
-        description: 'Cadastre o primeiro equipamento a partir do local correspondente (RN-010).',
+        description: 'Cadastre o primeiro equipamento a partir do local correspondente.',
       };
 
   return (
@@ -159,7 +159,7 @@ export default function EquipmentCatalogPage() {
         <div>
           <h1 className="text-2xl font-extrabold text-navy-900">Equipamentos</h1>
           <p className="text-sm text-slate-500">
-            Catálogo consolidado — para cadastrar um novo, acesse o local correspondente (RN-010).
+            Catálogo consolidado — para cadastrar um novo, acesse o local correspondente.
           </p>
         </div>
         <ExportCsvButton

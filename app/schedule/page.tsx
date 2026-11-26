@@ -164,7 +164,7 @@ export default function SchedulePage() {
             </Field>
             {models.length === 0 && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Nenhum modelo publicado disponível. Publique uma versão em Modelos de inspeção (RN-024).
+                Nenhum modelo publicado disponível. Publique uma versão em Modelos de inspeção.
               </p>
             )}
             {selectedModel && localOnly && (
@@ -224,7 +224,7 @@ export default function SchedulePage() {
                 )}
               </Field>
             </div>
-            <Field label="Equipamento (opcional para inspeções de local/ambiente — RN-026)">
+            <Field label="Equipamento (opcional para inspeções de local/ambiente)">
               <select
                 value={equipamentoId}
                 onChange={(e) => setEquipamentoId(e.target.value)}
@@ -350,15 +350,6 @@ export default function SchedulePage() {
             </dl>
           </div>
 
-          <div className="bg-navy-900 text-white rounded-2xl p-5">
-            <h2 className="text-xs font-bold text-brandgreen-500 uppercase mb-2">Regras de negócio</h2>
-            <ul className="space-y-2 text-xs text-slate-300 leading-relaxed">
-              <li><strong className="text-white">RN-024</strong> — Somente modelos com versão publicada podem ser usados.</li>
-              <li><strong className="text-white">RN-025</strong> — Cliente, local, técnico e data prevista (no futuro) são obrigatórios.</li>
-              <li><strong className="text-white">Estado inicial</strong> — A inspeção nasce Atribuída ao técnico escolhido.</li>
-              <li><strong className="text-white">RN-027</strong> — Apenas técnicos ativos podem receber novas atribuições.</li>
-            </ul>
-          </div>
         </div>
       </div>
 

@@ -1,14 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { InspectionStatusBadge, PriorityTag } from '@/components/Badges';
 import { formatDateTime } from '@/lib/inspection-display';
 import { EmptyState, ErrorState, LoadingState } from '@/components/States';
 import { useDashboardIndicators, type DashboardIndicatorsState } from '@/hooks/useDashboardIndicators';
-import type { Criticidade, InspectionStatus } from '@/types';
-
-const ACTIVE_STATUSES: InspectionStatus[] = ['ATRIBUIDA', 'EM_ANDAMENTO'];
+import { listInspections } from '@/lib/inspections-api';
+import type { Criticidade, Inspection, InspectionStatus } from '@/types';
 
 /** Ordem do fluxo de negócio (Seção 7 da doc) — usada para desenhar o funil na ordem certa. */
 const STATUS_ORDER: InspectionStatus[] = [
@@ -55,38 +55,6 @@ const CRITICIDADE_BAR: Record<Criticidade, string> = {
   BAIXA: 'bg-slate-400',
 };
 
-const ACTION_LABEL: Record<string, string> = {
-  ACESSOU: 'entrou no painel',
-  SAIU: 'saiu do painel',
-  CRIOU: 'criou',
-  ATUALIZOU: 'atualizou',
-  PUBLICOU: 'publicou',
-  AGENDOU: 'agendou',
-  INICIOU_REVISAO: 'iniciou a revisão de',
-  APROVOU: 'aprovou',
-  REPROVOU: 'reprovou',
-  RESOLVEU: 'resolveu',
-  REABRIU: 'reabriu',
-  ATIVOU: 'ativou',
-  INATIVOU: 'inativou',
-  ALTEROU_STATUS: 'alterou o status de',
-  SOLICITOU_ACESSO: 'solicitou acesso ao painel',
-  APROVOU_ACESSO: 'aprovou o acesso de',
-  REJEITOU_ACESSO: 'rejeitou o acesso de',
-  REDEFINIU_SENHA: 'redefiniu a senha de',
-};
-const ACTION_TONE: Record<string, string> = {
-  PUBLICOU: 'bg-emerald-500',
-  APROVOU: 'bg-emerald-500',
-  CRIOU: 'bg-emerald-500',
-  ATIVOU: 'bg-emerald-500',
-  RESOLVEU: 'bg-emerald-500',
-  APROVOU_ACESSO: 'bg-emerald-500',
-  REPROVOU: 'bg-red-500',
-  REJEITOU_ACESSO: 'bg-red-500',
-  INATIVOU: 'bg-red-400',
-};
-
 function initials(nome: string) {
   return nome
     .split(' ')
@@ -106,11 +74,19 @@ function greeting() {
 
 export default function DashboardPage() {
   const currentUser = useAppStore((s) => s.currentUser);
-  const inspections = useAppStore((s) => s.inspections);
   const clients = useAppStore((s) => s.clients);
-  const technicians = useAppStore((s) => s.users.filter((u) => u.role === 'TECHNICIAN'));
-  const models = useAppStore((s) => s.models);
-  const auditEvents = useAppStore((s) => s.auditEvents);
+  const users = useAppStore((s) => s.users);
+  const loadClients = useAppStore((s) => s.loadClients);
+  const loadUsers = useAppStore((s) => s.loadUsers);
+  const [inspections, setInspections] = useState<Inspection[]>([]);
+
+  useEffect(() => {
+    void loadClients();
+    void loadUsers();
+    void listInspections({ page: 0, size: 100, sort: { field: 'scheduledFor', dir: 'desc' }, q: '', filters: {} })
+      .then((result) => setInspections(result.items))
+      .catch(() => setInspections([]));
+  }, [loadClients, loadUsers]);
 
   // Indicadores por estado e criticidade vêm da API (GET /dashboard/indicators), não do estado local.
   const indicators = useDashboardIndicators();
@@ -123,14 +99,9 @@ export default function DashboardPage() {
   const totalInspections = ind?.totalInspections || 1;
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.nome ?? '—';
-  const techName = (id: string) => technicians.find((t) => t.id === id)?.nome ?? '—';
+  const techName = (id: string) => users.find((t) => t.id === id)?.nome ?? '—';
 
   const recentes = [...inspections].sort((a, b) => (a.dataPrevista < b.dataPrevista ? 1 : -1)).slice(0, 6);
-
-  const techWorkload = [...technicians]
-    .map((t) => ({ ...t, count: inspections.filter((i) => i.tecnicoId === t.id && ACTIVE_STATUSES.includes(i.status)).length }))
-    .sort((a, b) => b.count - a.count);
-  const maxWorkload = Math.max(1, ...techWorkload.map((t) => t.count));
 
   // Só os estados que a API informa ("Devolvida" não existe nela e não é exibida como 0).
   const funil = STATUS_ORDER.filter((status) => ind && status in ind.inspectionsByStatus).map((status) => ({
@@ -142,21 +113,6 @@ export default function DashboardPage() {
   const ncByCriticidade = CRITICIDADE_ORDER.map((c) => ({ criticidade: c, count: ind?.openNonConformitiesBySeverity[c] ?? 0 }));
   const totalOpenNC = ind?.totalOpenNonConformities ?? 0;
   const totalNC = totalOpenNC || 1;
-
-  // RN-039/054: taxa de conformidade sobre respostas do tipo conforme/não conforme (ignora N/A e outros tipos de item).
-  let conforme = 0;
-  let naoConforme = 0;
-  inspections.forEach((i) =>
-    Object.values(i.answers).forEach((a) => {
-      if (a.conformity === 'CONFORME') conforme++;
-      else if (a.conformity === 'NAO_CONFORME') naoConforme++;
-    })
-  );
-  const totalConformidade = conforme + naoConforme;
-  const taxaConformidade = totalConformidade > 0 ? Math.round((conforme / totalConformidade) * 100) : null;
-
-  const publishedModels = models.filter((m) => m.status === 'PUBLICADO').length;
-  const recentActivity = auditEvents.slice(0, 6);
 
   return (
     <div>
@@ -326,81 +282,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Atividade recente — feed real da trilha de auditoria (RN-086), não é enfeite */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <IconActivity />
-                <h2 className="font-bold text-navy-900">Atividade recente</h2>
-              </div>
-              <Link href="/audit" className="text-sm font-semibold text-navy-700">Ver auditoria →</Link>
-            </div>
-            {recentActivity.length === 0 ? (
-              <p className="text-sm text-slate-400">Nenhum evento registrado ainda.</p>
-            ) : (
-              <ul className="space-y-4">
-                {recentActivity.map((e) => (
-                  <li key={e.id} className="flex items-start gap-3">
-                    <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${ACTION_TONE[e.action] ?? 'bg-slate-300'}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-navy-900">
-                        <span className="font-semibold">{e.userNome}</span> {ACTION_LABEL[e.action] ?? e.action.toLowerCase()}
-                        {e.entity && e.entity !== 'Sessão' ? ` ${e.entity.toLowerCase()}` : ''}
-                      </p>
-                      {e.details && <p className="text-xs text-slate-500 truncate">{e.details}</p>}
-                    </div>
-                    <span className="text-[11px] font-mono text-slate-400 shrink-0 whitespace-nowrap">
-                      {new Date(e.timestamp).toLocaleDateString('pt-BR')}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col items-center text-center">
-            <h2 className="text-xs font-bold text-navy-700 uppercase self-start mb-4">Taxa de conformidade</h2>
-            <ConformityMeter rate={taxaConformidade} />
-            <p className="text-xs text-slate-500 mt-3">
-              {totalConformidade > 0 ? (
-                <>
-                  <span className="font-bold text-emerald-600">{conforme} conformes</span> · <span className="font-bold text-red-500">{naoConforme} não conformes</span>
-                </>
-              ) : (
-                'Sem respostas de conformidade registradas ainda.'
-              )}
-            </p>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <h2 className="text-xs font-bold text-navy-700 uppercase mb-3.5">Técnicos em campo</h2>
-            {techWorkload.length === 0 ? (
-              <p className="text-sm text-slate-400">Nenhum técnico cadastrado.</p>
-            ) : (
-              <ul className="space-y-3">
-                {techWorkload.map((t) => (
-                  <li key={t.id}>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="flex items-center gap-2 min-w-0">
-                        <Avatar nome={t.nome} size={24} muted={t.status !== 'ATIVO'} />
-                        <span className="truncate text-sm font-semibold text-navy-900">{t.nome}</span>
-                      </span>
-                      <span className="text-xs font-bold text-slate-500 shrink-0">{t.count} ativa{t.count === 1 ? '' : 's'}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden ml-[32px]">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${t.status === 'ATIVO' ? 'bg-brandgreen-500' : 'bg-slate-300'}`}
-                        style={{ width: t.count > 0 ? `${Math.max((t.count / maxWorkload) * 100, 8)}%` : '0%' }}
-                      />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
           <div className="bg-white border border-slate-200 rounded-2xl p-5">
             <h2 className="text-xs font-bold text-navy-700 uppercase mb-3.5">Não conformidades abertas por criticidade</h2>
             <IndicatorsBoundary state={indicators}>
@@ -434,14 +318,6 @@ export default function DashboardPage() {
             </IndicatorsBoundary>
           </div>
 
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
-            <h2 className="text-xs font-bold text-navy-700 uppercase mb-3">Modelos de inspeção</h2>
-            <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-3xl font-extrabold text-navy-900">{publishedModels}</span>
-              <span className="text-sm text-slate-500">publicado{publishedModels === 1 ? '' : 's'} de {models.length}</span>
-            </div>
-            <Link href="/models" className="text-xs font-semibold text-brandgreen-600 hover:underline">Gerenciar modelos →</Link>
-          </div>
         </div>
       </div>
     </div>
@@ -456,37 +332,6 @@ function Avatar({ nome, size = 24, muted }: { nome: string; size?: number; muted
     >
       {initials(nome)}
     </span>
-  );
-}
-
-function ConformityMeter({ rate }: { rate: number | null }) {
-  const size = 132;
-  const stroke = 13;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const dash = ((rate ?? 0) / 100) * c;
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-brandgreen-500/15" />
-        {rate !== null && (
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            fill="none"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            className="stroke-brandgreen-600 transition-all duration-700 ease-out"
-            strokeDasharray={`${dash} ${c - dash}`}
-          />
-        )}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-extrabold text-navy-900">{rate !== null ? `${rate}%` : '—'}</span>
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mt-0.5">conformes</span>
-      </div>
-    </div>
   );
 }
 

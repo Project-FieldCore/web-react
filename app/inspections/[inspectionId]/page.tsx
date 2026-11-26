@@ -283,7 +283,7 @@ export default function InspectionReviewPage() {
 
       {canReview && showRejectForm && (
         <div className="bg-white border border-red-200 rounded-2xl p-5 mt-3">
-          <label className="text-xs font-bold text-red-700 uppercase block mb-1">Motivo da reprovação (obrigatório — RN-080)</label>
+          <label className="text-xs font-bold text-red-700 uppercase block mb-1">Motivo da reprovação (obrigatório)</label>
           <textarea
             value={motivo}
             onChange={(e) => setMotivo(e.target.value.slice(0, 2000))}

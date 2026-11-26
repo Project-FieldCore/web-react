@@ -30,7 +30,7 @@ export default function AuditPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-extrabold text-navy-900">Auditoria</h1>
-        <p className="text-sm text-slate-500">Histórico de ações críticas do painel (RN-086) — nada aqui é apagado (RN-088).</p>
+        <p className="text-sm text-slate-500">Histórico de ações críticas do painel.</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
