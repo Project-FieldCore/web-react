@@ -827,7 +827,26 @@ export const useAppStore = create<AppState>()(
     loadModels: async () => {
       set({ modelsStatus: 'loading', modelsError: null });
       try {
-        const models = await modelsApi.listModels();
+        const summaries = await modelsApi.listModels();
+        // A rota de catálogo devolve apenas os metadados do template. A página
+        // também exibe os totais de seções/itens, então precisa carregar a
+        // estrutura da versão correspondente antes de gravar os modelos no
+        // store. Sem esta hidratação, todos os cartões aparecem com 0 itens,
+        // mesmo quando o checklist existe na API.
+        const models = await Promise.all(
+          summaries.map(async (model) => {
+            const versionId = model.draftVersionId ?? model.latestVersionId;
+            if (!versionId) return model;
+            const sections = await sectionsApi.listSections(versionId);
+            const withItems = await Promise.all(
+              sections.map(async (section) => ({
+                ...section,
+                items: await itemsApi.listItems(section.id),
+              }))
+            );
+            return { ...model, sections: withItems };
+          })
+        );
         set({ models, modelsStatus: 'ready', modelsError: null });
       } catch (error) {
         const { error: message } = toErrorResult(error, 'Não foi possível carregar os modelos. Tente novamente.');
