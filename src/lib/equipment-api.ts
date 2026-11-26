@@ -80,16 +80,10 @@ export async function listEquipmentBySite(siteId: string): Promise<Equipment[]> 
   return (await http.get<ApiEquipment[]>(`/sites/${siteId}/equipment`)).map(toEquipment);
 }
 
-export async function createEquipment(
-  siteId: string,
-  nome: string,
-  qrCode: string,
-  tipo?: string
-): Promise<Equipment> {
+export async function createEquipment(siteId: string, nome: string, tipo?: string): Promise<Equipment> {
   return toEquipment(
     await http.post<ApiEquipment>(`/sites/${siteId}/equipment`, {
       name: nome,
-      qrCode,
       assetNumber: tipo || undefined,
     })
   );
@@ -115,13 +109,6 @@ export async function setEquipmentActive(id: string, ativo: boolean, version: nu
       status: ativo ? 'ACTIVE' : 'INACTIVE',
       version,
     })
-  );
-}
-
-/** Atribui/troca o QR (endpoint dedicado; 409 QR_CODE_ALREADY_EXISTS). */
-export async function assignEquipmentQrCode(id: string, qrCode: string, version: number): Promise<Equipment> {
-  return toEquipment(
-    await http.patch<ApiEquipment>(`/equipment/${id}/qr-code`, { qrCode, version })
   );
 }
 

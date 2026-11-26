@@ -230,7 +230,7 @@ function NewClientModal({
   onCreate,
 }: {
   onClose: () => void;
-  onCreate: (nome: string, cnpj?: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  onCreate: (nome: string, cnpj: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
 }) {
   const [nome, setNome] = useState('');
   const [cnpj, setCnpj] = useState('');
@@ -240,7 +240,7 @@ function NewClientModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const result = await onCreate(nome, cnpj || undefined);
+    const result = await onCreate(nome, cnpj);
     setLoading(false);
     if (!result.ok) {
       setError(result.error);
@@ -255,8 +255,8 @@ function NewClientModal({
         <Field label="Nome" required>
           <input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" required autoFocus />
         </Field>
-        <Field label="CNPJ (opcional)">
-          <input value={cnpj} onChange={(e) => setCnpj(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="00.000.000/0000-00" />
+        <Field label="CNPJ" required>
+          <input value={cnpj} onChange={(e) => setCnpj(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="00.000.000/0000-00" required />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
         <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">

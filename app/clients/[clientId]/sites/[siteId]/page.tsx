@@ -6,6 +6,7 @@ import { useAppStore } from '@/store/app-store';
 import { ActiveBadge } from '@/components/Badges';
 import { Field, Modal } from '@/components/Modal';
 import { ErrorState, LoadingState } from '@/components/States';
+import { QrCodeImage } from '@/components/QrCodeImage';
 
 /**
  * Detalhe do local + gestão dos seus equipamentos.
@@ -31,7 +32,6 @@ export default function SiteDetailPage() {
   const updateLocation = useAppStore((s) => s.updateLocation);
   const setLocationActive = useAppStore((s) => s.setLocationActive);
   const createEquipment = useAppStore((s) => s.createEquipment);
-  const assignEquipmentQrCode = useAppStore((s) => s.assignEquipmentQrCode);
   const setEquipmentActive = useAppStore((s) => s.setEquipmentActive);
 
   const [showNewEquipment, setShowNewEquipment] = useState(false);
@@ -187,7 +187,6 @@ export default function SiteDetailPage() {
                 <EquipmentRow
                   key={eq.id}
                   eq={eq}
-                  onAssignQr={assignEquipmentQrCode}
                   onToggle={async (ativo) => {
                     const result = await setEquipmentActive(eq.id, ativo);
                     if (!result.ok) setEditError(result.error);
@@ -208,15 +207,7 @@ export default function SiteDetailPage() {
                   <ActiveBadge ativo={eq.ativo} />
                 </div>
                 <div className="text-xs text-slate-500 mb-1">{eq.tipo ?? '—'}</div>
-                <QrField
-                  qrCode={eq.qrCode}
-                  onSave={async (next) => {
-                    const result = await assignEquipmentQrCode(eq.id, next);
-                    if (!result.ok) return result.error;
-                    setNotice('Código QR atualizado.');
-                    return null;
-                  }}
-                />
+                <QrField qrCode={eq.qrCode} />
                 <button
                   onClick={() => void setEquipmentActive(eq.id, !eq.ativo)}
                   className={`text-xs font-semibold mt-3 ${eq.ativo ? 'text-slate-500' : 'text-emerald-600'}`}
@@ -241,22 +232,8 @@ export default function SiteDetailPage() {
   );
 }
 
-function QrField({
-  qrCode,
-  onSave,
-}: {
-  qrCode: string;
-  onSave: (next: string) => Promise<string | null>;
-}) {
-  const [error, setError] = useState<string | null>(null);
+function QrField({ qrCode }: { qrCode: string }) {
   const [copied, setCopied] = useState(false);
-
-  async function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
-    const value = e.target.value;
-    if (value === qrCode) return;
-    const message = await onSave(value);
-    setError(message);
-  }
 
   async function handleCopy() {
     try {
@@ -264,36 +241,28 @@ function QrField({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setError('Não foi possível copiar o código QR.');
+      return;
     }
   }
 
   return (
     <div>
+      <QrCodeImage value={qrCode} label="equipamento" />
       <div className="flex items-center gap-2">
-        <input
-          key={qrCode}
-          defaultValue={qrCode}
-          onBlur={(e) => void handleBlur(e)}
-          className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono bg-slate-50"
-          aria-label="Código QR"
-        />
+        <code className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono bg-slate-50 truncate">{qrCode}</code>
         <button type="button" onClick={() => void handleCopy()} className="shrink-0 text-[11px] font-bold text-navy-700">
           {copied ? 'Copiado' : 'Copiar'}
         </button>
       </div>
-      {error && <p className="text-[11px] text-red-600 font-semibold mt-1">{error}</p>}
     </div>
   );
 }
 
 function EquipmentRow({
   eq,
-  onAssignQr,
   onToggle,
 }: {
   eq: { id: string; nome: string; tipo?: string; qrCode: string; ativo: boolean };
-  onAssignQr: (id: string, qrCode: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onToggle: (ativo: boolean) => void | Promise<void>;
 }) {
   return (
@@ -301,13 +270,7 @@ function EquipmentRow({
       <td className="px-5 py-3 font-semibold text-navy-900 truncate">{eq.nome}</td>
       <td className="px-5 py-3 text-slate-600 truncate">{eq.tipo ?? '—'}</td>
       <td className="px-5 py-3">
-        <QrField
-          qrCode={eq.qrCode}
-          onSave={async (next) => {
-            const result = await onAssignQr(eq.id, next);
-            return result.ok ? null : result.error;
-          }}
-        />
+        <QrField qrCode={eq.qrCode} />
       </td>
       <td className="px-5 py-3">
         <ActiveBadge ativo={eq.ativo} />
@@ -335,21 +298,19 @@ function NewEquipmentModal({
   onCreate: (
     localId: string,
     nome: string,
-    qrCode: string,
     tipo?: string
   ) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   onCreated?: () => void;
 }) {
   const [nome, setNome] = useState('');
   const [tipo, setTipo] = useState('');
-  const [qrCode, setQrCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const result = await onCreate(localId, nome, qrCode, tipo || undefined);
+    const result = await onCreate(localId, nome, tipo || undefined);
     setLoading(false);
     if (!result.ok) {
       setError(result.error);
@@ -368,9 +329,7 @@ function NewEquipmentModal({
         <Field label="Tipo (opcional)">
           <input value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Compressor, painel elétrico, veículo..." />
         </Field>
-        <Field label="Código QR" required>
-          <input value={qrCode} onChange={(e) => setQrCode(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono" placeholder="QR-XXXXX" required />
-        </Field>
+        <p className="text-xs text-slate-500 mb-4">O sistema gera o QR Code automaticamente após o cadastro.</p>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
         <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">
           {loading ? 'Criando...' : 'Criar equipamento'}

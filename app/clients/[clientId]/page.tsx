@@ -317,7 +317,7 @@ function NewLocationModal({
 }: {
   clienteId: string;
   onClose: () => void;
-  onCreate: (clienteId: string, nome: string, endereco?: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+  onCreate: (clienteId: string, nome: string, endereco: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
 }) {
   const [nome, setNome] = useState('');
   const [endereco, setEndereco] = useState('');
@@ -327,7 +327,7 @@ function NewLocationModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const result = await onCreate(clienteId, nome, endereco || undefined);
+    const result = await onCreate(clienteId, nome, endereco);
     setLoading(false);
     if (!result.ok) {
       setError(result.error);
@@ -342,8 +342,8 @@ function NewLocationModal({
         <Field label="Nome" required>
           <input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" required autoFocus />
         </Field>
-        <Field label="Endereço (opcional)">
-          <input value={endereco} onChange={(e) => setEndereco(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+        <Field label="Endereço" required>
+          <input value={endereco} onChange={(e) => setEndereco(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" required />
         </Field>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg px-3 py-2 mb-3">{error}</div>}
         <button type="submit" disabled={loading} className="w-full bg-brandgreen-600 text-white rounded-xl py-2.5 font-bold mt-1 disabled:opacity-60">

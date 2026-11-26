@@ -68,8 +68,8 @@ export async function listClients(): Promise<Client[]> {
   });
 }
 
-export async function createClient(nome: string, cnpj?: string): Promise<Client> {
-  return toClient(await http.post<ApiClient>('/clients', { name: nome, document: cnpj }));
+export async function createClient(nome: string, cnpj: string): Promise<Client> {
+  return toClient(await http.post<ApiClient>('/clients', { name: nome, document: cnpj.replace(/\D/g, '') }));
 }
 
 export async function updateClient(

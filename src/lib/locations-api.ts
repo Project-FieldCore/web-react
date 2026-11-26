@@ -93,7 +93,7 @@ export async function listLocations(): Promise<Location[]> {
   });
 }
 
-export async function createLocation(clienteId: string, nome: string, endereco?: string): Promise<Location> {
+export async function createLocation(clienteId: string, nome: string, endereco: string): Promise<Location> {
   return toLocation(await http.post<ApiSite>(`/clients/${clienteId}/sites`, { name: nome, addressLine: endereco }));
 }
 

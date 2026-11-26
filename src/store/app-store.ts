@@ -135,19 +135,17 @@ interface AppState {
   rejectAccessRequest: (requestId: string) => void;
 
   // --- cadastros: clientes/locais (05 - Perfis, RN-009/013) — integrados à API (#133) ---
-  createClient: (nome: string, cnpj?: string) => Promise<ResultWithId>;
+  createClient: (nome: string, cnpj: string) => Promise<ResultWithId>;
   updateClient: (id: string, patch: Partial<Pick<Client, 'nome' | 'cnpj'>>) => Promise<Result>;
   setClientActive: (id: string, ativo: boolean) => Promise<Result>;
 
-  createLocation: (clienteId: string, nome: string, endereco?: string) => Promise<ResultWithId>;
+  createLocation: (clienteId: string, nome: string, endereco: string) => Promise<ResultWithId>;
   updateLocation: (id: string, patch: Partial<Pick<Location, 'nome' | 'endereco'>>) => Promise<Result>;
   setLocationActive: (id: string, ativo: boolean) => Promise<Result>;
 
   // --- cadastro de equipamentos (RN-010/011/013) — integrado à API ---
-  createEquipment: (localId: string, nome: string, qrCode: string, tipo?: string) => Promise<ResultWithId>;
+  createEquipment: (localId: string, nome: string, tipo?: string) => Promise<ResultWithId>;
   updateEquipment: (id: string, patch: Partial<Pick<Equipment, 'nome' | 'tipo'>>) => Promise<Result>;
-  /** Atribui/edita QR via PATCH /equipment/{id}/qr-code (409 QR_CODE_ALREADY_EXISTS). */
-  assignEquipmentQrCode: (id: string, qrCode: string) => Promise<Result>;
   setEquipmentActive: (id: string, ativo: boolean) => Promise<Result>;
 
   // --- cadastro de usuários (RN-001/002/003/007) — integrado à API (#133) ---
@@ -457,10 +455,11 @@ export const useAppStore = create<AppState>()(
     // RN-009: todo local pertence a um cliente. RN-013: inativação, nunca exclusão física.
     // Integrado à API (#133) — ver src/lib/clients-api.ts para o contrato assumido.
     createClient: async (nome, cnpj) => {
+      if (!cnpj.trim()) return { ok: false, error: 'Informe o CNPJ.' };
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do cliente.' };
       let client: Client;
       try {
-        client = await clientsApi.createClient(nome.trim(), cnpj?.trim() || undefined);
+        client = await clientsApi.createClient(nome.trim(), cnpj.trim());
       } catch (error) {
         return toErrorResult(error, 'Não foi possível criar o cliente. Tente novamente.');
       }
@@ -507,9 +506,10 @@ export const useAppStore = create<AppState>()(
       const client = get().clients.find((c) => c.id === clienteId);
       if (!client) return { ok: false, error: 'Cliente não encontrado (RN-009).' };
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do local.' };
+      if (!endereco.trim()) return { ok: false, error: 'Informe o endereço do local.' };
       let location: Location;
       try {
-        location = await locationsApi.createLocation(clienteId, nome.trim(), endereco?.trim() || undefined);
+        location = await locationsApi.createLocation(clienteId, nome.trim(), endereco.trim());
       } catch (error) {
         return toErrorResult(error, 'Não foi possível criar o local. Tente novamente.');
       }
@@ -552,16 +552,13 @@ export const useAppStore = create<AppState>()(
     },
 
     // RN-010: todo equipamento pertence a um local. RN-011: QR único (API).
-    createEquipment: async (localId, nome, qrCode, tipo) => {
+    createEquipment: async (localId, nome, tipo) => {
       const location = get().locations.find((l) => l.id === localId);
       if (!location) return { ok: false, error: 'Local não encontrado (RN-010).' };
       if (!nome.trim()) return { ok: false, error: 'Informe o nome do equipamento.' };
-      const qr = qrCode.trim();
-      if (!qr) return { ok: false, error: 'Informe o código QR do equipamento.' };
-
       let equipment: Equipment;
       try {
-        equipment = await equipmentApi.createEquipment(localId, nome.trim(), qr, tipo?.trim() || undefined);
+        equipment = await equipmentApi.createEquipment(localId, nome.trim(), tipo?.trim() || undefined);
       } catch (error) {
         return toErrorResult(error, 'Não foi possível criar o equipamento. Tente novamente.');
       }
@@ -582,22 +579,6 @@ export const useAppStore = create<AppState>()(
       }
       set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? equipment : e)) }));
       pushAudit('ATUALIZOU', 'Equipamento', id);
-      return { ok: true };
-    },
-    assignEquipmentQrCode: async (id, qrCode) => {
-      const qr = qrCode.trim();
-      if (!qr) return { ok: false, error: 'Informe o código QR do equipamento.' };
-      const version = get().equipment.find((e) => e.id === id)?.version;
-      if (version === undefined) return { ok: false, error: 'Recarregue a lista de equipamentos e tente de novo.' };
-      let equipment: Equipment;
-      try {
-        equipment = await equipmentApi.assignEquipmentQrCode(id, qr, version);
-      } catch (error) {
-        await reloadEquipmentOnVersionConflict(error);
-        return toErrorResult(error, 'Não foi possível atualizar o código QR. Tente novamente.');
-      }
-      set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? equipment : e)) }));
-      pushAudit('ATUALIZOU', 'Equipamento', id, `QR ${qr}`);
       return { ok: true };
     },
     setEquipmentActive: async (id, ativo) => {
