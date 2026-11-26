@@ -214,16 +214,14 @@ export default function InspectionsListPage() {
         <div className={`bg-white border border-slate-200 rounded-2xl overflow-hidden ${list.refreshing ? 'opacity-70' : ''}`}>
           <table className="hidden xl:table w-full text-sm table-fixed">
             <colgroup>
-              <col className="w-[10%]" />
-              <col className="w-[21%]" />
-              <col className="w-[18%]" />
-              <col className="w-[13%]" />
-              <col className="w-[24%]" />
-              <col className="w-[14%]" />
+              <col className="w-[25%]" />
+              <col className="w-[20%]" />
+              <col className="w-[15%]" />
+              <col className="w-[25%]" />
+              <col className="w-[15%]" />
             </colgroup>
             <thead>
               <tr className="text-left text-slate-500 text-xs uppercase border-b border-slate-100">
-                <th className="px-5 py-3">ID</th>
                 <th className="px-5 py-3">Cliente</th>
                 <th className="px-5 py-3">Técnico</th>
                 <th className="px-5 py-3">Prioridade</th>
@@ -234,7 +232,6 @@ export default function InspectionsListPage() {
             <tbody>
               {list.items.map((i) => (
                 <tr key={i.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                  <td className="px-5 py-3 font-mono text-xs text-slate-400 truncate">{i.id}</td>
                   <td className="px-5 py-3 font-semibold text-navy-900 truncate">
                     <Link href={`/inspections/${i.id}`}>{clientName(i.clienteId)}</Link>
                   </td>
@@ -245,7 +242,7 @@ export default function InspectionsListPage() {
                 </tr>
               ))}
               {list.items.length === 0 && (
-                <tr><td colSpan={6}><EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros para ver outros resultados." /></td></tr>
+                <tr><td colSpan={5}><EmptyState title="Nenhuma inspeção encontrada" description="Ajuste os filtros para ver outros resultados." /></td></tr>
               )}
             </tbody>
           </table>
@@ -256,7 +253,6 @@ export default function InspectionsListPage() {
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="min-w-0">
                     <div className="font-semibold text-navy-900 truncate">{clientName(i.clienteId)}</div>
-                    <div className="text-xs font-mono text-slate-400 truncate">{i.id}</div>
                   </div>
                   <InspectionStatusBadge status={i.status} />
                 </div>

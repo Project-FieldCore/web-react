@@ -236,9 +236,6 @@ export default function ReviewQueuePage() {
                     >
                       {item.title}
                     </Link>
-                    {process.env.NODE_ENV === 'development' ? (
-                      <div className="font-mono text-[10px] font-normal text-slate-400">{item.id.slice(0, 8)}</div>
-                    ) : null}
                   </td>
                   <td className="px-3 py-3.5 text-slate-700">
                     <span className="block leading-snug line-clamp-2 break-words" title={item.clientName}>{item.clientName}</span>

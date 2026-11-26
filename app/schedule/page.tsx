@@ -145,7 +145,7 @@ export default function SchedulePage() {
     if (!result.ok) return;
     // RN-028: inspeção enviada pela API aparece para o técnico depois da sincronização no aplicativo.
     setSuccess(
-      `Inspeção ${result.id} agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}. ${SYNC_NOTICE}`
+      `Inspeção agendada e atribuída a ${selectedTech?.nome ?? 'o técnico'}. ${SYNC_NOTICE}`
     );
     setTimeout(() => router.push('/inspections'), 900);
   }

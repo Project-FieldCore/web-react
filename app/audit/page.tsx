@@ -13,8 +13,16 @@ function payloadText(payload: string | null) {
   try {
     const parsed: unknown = JSON.parse(payload);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return payload;
-    return Object.entries(parsed as Record<string, unknown>).map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`).join(' · ');
+    return Object.entries(parsed as Record<string, unknown>)
+      .filter(([key]) => !/(^id$|id$)/i.test(key))
+      .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+      .join(' · ') || '—';
   } catch { return payload; }
+}
+
+/** Identificadores são dados internos: não devem ser expostos na interface. */
+function withoutIds(text: string) {
+  return text.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[oculto]');
 }
 
 export default function AuditPage() {
@@ -35,6 +43,6 @@ export default function AuditPage() {
   </div>;
 }
 
-function AuditRow({ event }: { event: AuditLog }) { return <tr className="border-b border-slate-50 last:border-0 hover:bg-slate-50"><td className="px-5 py-3 text-slate-500 font-mono text-xs">{new Date(event.createdAt).toLocaleString('pt-BR')}</td><td className="px-5 py-3 font-semibold text-navy-900 truncate">{event.actorName ?? 'Sistema'}</td><td className="px-5 py-3"><ActionTag action={event.action} /></td><td className="px-5 py-3 text-slate-600 truncate">{label(event.entityType)} · <span className="font-mono text-xs">{event.entityId}</span></td><td className="px-5 py-3 text-slate-500 truncate" title={payloadText(event.payload)}>{payloadText(event.payload)}</td></tr>; }
-function AuditCard({ event }: { event: AuditLog }) { return <div className="p-4"><div className="flex items-start justify-between gap-3 mb-2"><span className="font-semibold text-navy-900 truncate">{event.actorName ?? 'Sistema'}</span><ActionTag action={event.action} /></div><p className="text-xs text-slate-500">{label(event.entityType)} · <span className="font-mono">{event.entityId}</span></p><p className="text-xs text-slate-500 mt-1 break-words">{payloadText(event.payload)}</p><p className="text-[11px] font-mono text-slate-400 mt-2">{new Date(event.createdAt).toLocaleString('pt-BR')}</p></div>; }
+function AuditRow({ event }: { event: AuditLog }) { const details = withoutIds(payloadText(event.payload)); return <tr className="border-b border-slate-50 last:border-0 hover:bg-slate-50"><td className="px-5 py-3 text-slate-500 font-mono text-xs">{new Date(event.createdAt).toLocaleString('pt-BR')}</td><td className="px-5 py-3 font-semibold text-navy-900 truncate">{event.actorName ?? 'Sistema'}</td><td className="px-5 py-3"><ActionTag action={event.action} /></td><td className="px-5 py-3 text-slate-600 truncate">{label(event.entityType)}</td><td className="px-5 py-3 text-slate-500 truncate" title={details}>{details}</td></tr>; }
+function AuditCard({ event }: { event: AuditLog }) { return <div className="p-4"><div className="flex items-start justify-between gap-3 mb-2"><span className="font-semibold text-navy-900 truncate">{event.actorName ?? 'Sistema'}</span><ActionTag action={event.action} /></div><p className="text-xs text-slate-500">{label(event.entityType)}</p><p className="text-xs text-slate-500 mt-1 break-words">{withoutIds(payloadText(event.payload))}</p><p className="text-[11px] font-mono text-slate-400 mt-2">{new Date(event.createdAt).toLocaleString('pt-BR')}</p></div>; }
 function ActionTag({ action }: { action: string }) { return <span className="text-[11px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full whitespace-nowrap">{label(action)}</span>; }

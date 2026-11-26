@@ -36,7 +36,7 @@ export default function InspectionReportPage() {
   useEffect(() => {
     if (!inspection) return;
     const previous = document.title;
-    document.title = `Relatorio-${inspection.id}`;
+    document.title = 'Relatório de inspeção';
     return () => {
       document.title = previous;
     };
@@ -61,7 +61,7 @@ export default function InspectionReportPage() {
       <article className="bg-white border border-slate-200 rounded-2xl p-8 print:border-0 print:rounded-none print:p-0 text-sm text-slate-700">
         <header className="border-b border-slate-200 pb-4 mb-5">
           <div className="text-xs font-bold text-navy-700 uppercase tracking-wide">FieldCore · Relatório de inspeção</div>
-          <h1 className="text-2xl font-extrabold text-navy-900 mt-1">{inspection.id}</h1>
+          <h1 className="text-2xl font-extrabold text-navy-900 mt-1">Relatório de inspeção</h1>
           <div className="mt-2 flex items-center gap-2">
             <InspectionStatusBadge status={inspection.status} />
             <PriorityTag priority={inspection.prioridade} />
