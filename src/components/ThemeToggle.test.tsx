@@ -17,4 +17,10 @@ describe('ThemeToggle', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*>Sistema</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>Claro</);
   });
+
+  it('pode ser renderizado sobre uma superfície clara', () => {
+    const html = renderToStaticMarkup(<ThemeToggle variant="surface" />);
+    expect(html).toContain('border-slate-200');
+    expect(html).toContain('bg-slate-100');
+  });
 });

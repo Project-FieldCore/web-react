@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { BrandPanel } from './BrandPanel';
 import { IconAlertCircle, IconArrowLeft, IconCheckCircle, IconEye, IconEyeOff, IconLock, IconSpinner } from './AuthIcons';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 /**
  * Casco compartilhado por login, solicitar acesso e recuperar senha:
@@ -14,7 +15,10 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       <BrandPanel />
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-10 sm:px-6 bg-[#F2F6F8]">
+      <div className="relative flex-1 flex flex-col items-center justify-center px-4 py-16 sm:px-6 bg-[#F2F6F8]">
+        <div className="absolute right-4 top-4 w-52 sm:right-6 sm:top-6">
+          <ThemeToggle variant="surface" />
+        </div>
         <div className="lg:hidden bg-navy-900 rounded-2xl px-5 py-3 mb-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/logo-compact.png" alt="FieldCore" className="h-8 w-auto" />
